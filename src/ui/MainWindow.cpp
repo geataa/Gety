@@ -1117,14 +1117,45 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
         t3.currentSpeedBps = 0.0;
         t3.splitCount = 8;
         t3.supportsResume = true;
-        t3.addedDate = L"2026-09-06 02:00";
+        DownloadTaskInfo t4;
+        t4.id = L"task-hf-mistral";
+        t4.url = L"https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf";
+        t4.filename = L"mistral-7b-instruct-v0.2.Q4_K_M.gguf";
+        t4.saveDirectory = L"C:\\Downloads\\Models";
+        t4.fullPath = L"C:\\Downloads\\Models\\mistral-7b-instruct-v0.2.Q4_K_M.gguf";
+        t4.category = isTr ? L"Yapay Zeka" : L"AI Models";
+        t4.totalBytes = 4370546688ULL; // 4.07 GB
+        t4.downloadedBytes = 2306867200ULL; // 2.15 GB
+        t4.currentSpeedBps = 18.5 * 1024 * 1024;
+        t4.splitCount = 16;
+        t4.state = DownloadState::Downloading;
+        t4.supportsResume = true;
+        t4.addedDate = L"2026-09-07 20:20";
+
+        DownloadTaskInfo t5;
+        t5.id = L"task-ollama-nomic";
+        t5.url = L"https://registry.ollama.ai/v2/library/nomic-embed-text-v2-moe/blobs/sha256:913mb";
+        t5.filename = L"nomic-embed-text-v2-moe.gguf";
+        t5.saveDirectory = L"C:\\Downloads\\Models";
+        t5.fullPath = L"C:\\Downloads\\Models\\nomic-embed-text-v2-moe.gguf";
+        t5.category = isTr ? L"Yapay Zeka" : L"AI Models";
+        t5.totalBytes = 957677568ULL; // 913.3 MB
+        t5.downloadedBytes = 957677568ULL;
+        t5.currentSpeedBps = 0.0;
+        t5.splitCount = 10;
+        t5.state = DownloadState::Completed;
+        t5.supportsResume = true;
+        t5.addedDate = L"2026-09-07 19:50";
+        t5.completedDate = L"2026-09-07 19:53";
 
         tasks.push_back(t1);
+        tasks.push_back(t4);
         tasks.push_back(t2);
+        tasks.push_back(t5);
         tasks.push_back(t3);
         m_selectedTaskId = t1.id;
         m_selectedTaskIds.insert(t1.id);
-        m_selectedTaskIds.insert(t3.id);
+        m_selectedTaskIds.insert(t4.id);
     }
 
     if (m_selectedTaskId.empty() && !tasks.empty()) {

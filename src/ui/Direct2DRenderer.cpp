@@ -421,9 +421,9 @@ void Direct2DRenderer::UpdateLayout(int width, int height, int splitterX, int sp
     float tabY = sY + 5.0f * m_dpiScale + 5.0f * m_dpiScale;
     float tabH = 26.0f * m_dpiScale;
     for (auto& tab : m_detailTabs) {
-        float tabW = 96.0f * m_dpiScale;
+        float tabW = 125.0f * m_dpiScale;
         tab.rect = D2D1::RectF(tabX, tabY, tabX + tabW, tabY + tabH);
-        tabX += tabW + 4.0f * m_dpiScale;
+        tabX += tabW + 6.0f * m_dpiScale;
     }
 }
 
@@ -1003,11 +1003,11 @@ void Direct2DRenderer::RenderTaskListCard(
     m_pCurrentRT->FillRectangle(&headerR, m_pHeaderBrush);
 
     float cardW = m_rcTaskListCard.right - m_rcTaskListCard.left;
-    float colSizeW = 115.0f * m_dpiScale;
-    float colProgW = 140.0f * m_dpiScale;
-    float colSpeedW = 90.0f * m_dpiScale;
-    float colEtaW = 85.0f * m_dpiScale;
-    float colStatusW = 95.0f * m_dpiScale;
+    float colSizeW = 105.0f * m_dpiScale;
+    float colProgW = 135.0f * m_dpiScale;
+    float colSpeedW = 85.0f * m_dpiScale;
+    float colEtaW = 75.0f * m_dpiScale;
+    float colStatusW = 90.0f * m_dpiScale;
     float fixedW = colSizeW + colProgW + colSpeedW + colEtaW + colStatusW;
 
     float colFileW = (std::max)(130.0f * m_dpiScale, cardW - fixedW - 20.0f * m_dpiScale);
@@ -1561,7 +1561,8 @@ void Direct2DRenderer::RenderBottomBar(
 
     bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
     swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.0   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
-                                 L"⚡ Gety v1.0   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB",
+                                 (activeTasksCount == 1 ? L"⚡ Gety v1.0   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                                          L"⚡ Gety v1.0   |   ● %d Active Tasks   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB"),
         activeTasksCount,
         speedMB,
         dlMB,
@@ -1595,9 +1596,11 @@ bool Direct2DRenderer::SaveSnapshot(
     );
     if (FAILED(hr)) return false;
 
-    UINT w = (m_width >= 960) ? static_cast<UINT>(m_width) : 1000;
-    UINT h = (m_height >= 600) ? static_cast<UINT>(m_height) : 650;
-    UpdateLayout(static_cast<int>(w), static_cast<int>(h), m_splitterX, m_splitterY);
+    UINT w = 1500;
+    UINT h = 880;
+    int sX = 230;
+    int sY = 330;
+    UpdateLayout(static_cast<int>(w), static_cast<int>(h), sX, sY);
     m_mouseNearTop = true; // Always show top menus and window buttons in snapshot!
 
     IWICBitmap* pWicBitmap = nullptr;

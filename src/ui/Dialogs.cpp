@@ -43,7 +43,8 @@ static bool CaptureHwndToPng(HWND hwnd, const std::wstring& outPath) {
     HBITMAP hbm = CreateCompatibleBitmap(hdcScreen, w, h);
     HGDIOBJ oldBm = SelectObject(hdcMem, hbm);
 
-    RedrawWindow(hwnd, NULL, NULL, RDW_UPDATENOW | RDW_ALLCHILDREN);
+    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+    Sleep(80);
     PrintWindow(hwnd, hdcMem, PW_RENDERFULLCONTENT);
 
     SelectObject(hdcMem, oldBm);
@@ -2045,9 +2046,9 @@ static void LayoutModelControls(HWND hwnd, ModelDialogData* pData) {
     // 1. Top Segmented Tabs Bar
     int yTab = DlgScale(hwnd, 48);
     int tabH = DlgScale(hwnd, 32);
-    int tabW = DlgScale(hwnd, 180);
+    int tabW = DlgScale(hwnd, 220);
     MoveWindow(pData->hwndTabOllama, padX, yTab, tabW, tabH, TRUE);
-    MoveWindow(pData->hwndTabHf, padX + tabW + DlgScale(hwnd, 10), yTab, tabW, tabH, TRUE);
+    MoveWindow(pData->hwndTabHf, padX + tabW + DlgScale(hwnd, 12), yTab, tabW, tabH, TRUE);
 
     // Bottom Action Buttons (Shared)
     int btnH = DlgScale(hwnd, 34);
@@ -2454,7 +2455,10 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 }
 
                 if (!s_dialogSnapshotPath.empty()) {
-                    UpdateWindow(hwnd);
+                    InvalidateRect(pData->hwndDetails, NULL, TRUE);
+                    UpdateWindow(pData->hwndDetails);
+                    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+                    Sleep(100);
                     CaptureHwndToPng(hwnd, s_dialogSnapshotPath);
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 }
@@ -2547,7 +2551,10 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 }
 
                 if (!s_dialogSnapshotPath.empty()) {
-                    UpdateWindow(hwnd);
+                    InvalidateRect(pData->hwndHfDetails, NULL, TRUE);
+                    UpdateWindow(pData->hwndHfDetails);
+                    RedrawWindow(hwnd, NULL, NULL, RDW_INVALIDATE | RDW_ERASE | RDW_UPDATENOW | RDW_ALLCHILDREN);
+                    Sleep(100);
                     CaptureHwndToPng(hwnd, s_dialogSnapshotPath);
                     PostMessageW(hwnd, WM_CLOSE, 0, 0);
                 }
@@ -2656,6 +2663,12 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 } else {
                     SetTextColor(hdc, Theme::AccentCyan);
                 }
+            } else if (pData && (hCtl == pData->hwndDetails || hCtl == pData->hwndHfDetails)) {
+                SetTextColor(hdc, Theme::TextPrimary);
+                SetBkColor(hdc, Theme::BgInput);
+                SetBkMode(hdc, OPAQUE);
+                static HBRUSH hbrInput = CreateSolidBrush(Theme::BgInput);
+                return (LRESULT)hbrInput;
             } else {
                 SetTextColor(hdc, Theme::TextPrimary);
             }
@@ -2897,8 +2910,8 @@ bool Dialogs::ShowModelDownloaderDialog(HWND hParent, int initialTab, const std:
         prc.right = GetSystemMetrics(SM_CXSCREEN);
         prc.bottom = GetSystemMetrics(SM_CYSCREEN);
     }
-    int dlgW = DlgScale(hParent, 740);
-    int dlgH = DlgScale(hParent, 660);
+    int dlgW = DlgScale(hParent, 940);
+    int dlgH = DlgScale(hParent, 680);
     int x = prc.left + ((prc.right - prc.left) - dlgW) / 2;
     int y = prc.top + ((prc.bottom - prc.top) - dlgH) / 2;
 
