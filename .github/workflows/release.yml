@@ -1,0 +1,108 @@
+name: Build and Release Gety
+
+on:
+  push:
+    branches: [ main ]
+    tags:
+      - 'v*'
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: 'Release Tag Version (e.g., v1.0.0)'
+        required: false
+        default: 'v1.0.0'
+      create_release:
+        description: 'Publish as GitHub Release (true/false)'
+        required: false
+        default: 'true'
+        type: boolean
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows x64 Binary
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure CMake
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Gety & Tests (Release)
+        run: cmake --build build --config Release --target Gety test_engine
+
+      - name: Run Engine Automated Tests
+        run: .\build\Release\test_engine.exe
+
+      - name: Package Portable Distribution
+        shell: pwsh
+        run: |
+          $ver = if ("${{ github.ref_name }}" -match "^v[0-9]") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.tag_name }}") { "${{ github.event.inputs.tag_name }}" } else { "v1.0.0" }
+          
+          # Create clean staging directory
+          New-Item -ItemType Directory -Force -Path dist/Gety
+          Copy-Item build/Release/Gety.exe -Destination dist/Gety/Gety.exe
+          Copy-Item README.md -Destination dist/Gety/
+          Copy-Item LICENSE -Destination dist/Gety/
+          New-Item -ItemType Directory -Force -Path dist/Gety/tools
+          Copy-Item tools/README.md -Destination dist/Gety/tools/
+          
+          # Standalone root binary
+          Copy-Item build/Release/Gety.exe -Destination ./Gety.exe
+          
+          # Zip archive
+          $zipName = "Gety-$ver-windows-x64.zip"
+          Compress-Archive -Path dist/Gety/* -DestinationPath $zipName -Force
+          Copy-Item $zipName -Destination ./Gety-Portable-x64.zip
+          
+          echo "RELEASE_TAG=$ver" >> $env:GITHUB_ENV
+          echo "ZIP_NAME=$zipName" >> $env:GITHUB_ENV
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: Gety-Windows-x64
+          path: |
+            Gety.exe
+            Gety-*.zip
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'false')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Gety.exe
+            ${{ env.ZIP_NAME }}
+            Gety-Portable-x64.zip
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: Gety ${{ env.RELEASE_TAG }} - Ultra-Fast Download Manager & AI Model Hub
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## ⚡ Gety ${{ env.RELEASE_TAG }}
+            
+            Welcome to the official release of **Gety**, the high-performance native Windows download manager and AI model acquisition tool!
+            
+            ### 📦 Downloads
+            - **`Gety.exe`**: Standalone single portable executable (~1.7 MB). Just download and run!
+            - **`${{ env.ZIP_NAME }}`**: Portable zip package with documentation and license.
+            
+            ### 🌟 Key Features
+            - **Pure C++20 & Native Win32**: Ultra-lightweight (~1.7 MB, ~10 MB RAM usage, zero external DLL dependencies).
+            - **Multi-Segment Engine**: 1–30 parallel connections with zero-wait pre-allocated file merge.
+            - **🤖 Ollama Model Downloader**: Download LLMs directly by name (`llama3`, `deepseek-r1`, etc.) as GGUF or raw layers.
+            - **🤗 Hugging Face Model Downloader**: Live repo tree resolution, CDN redirect acceleration, and automated ⭐ GGUF quantization scoring.
+            - **Direct2D Visual Download Matrix**: Real-time hardware-accelerated chunk grid.
+            - **Desktop Drop Zone**: Floating semi-transparent HUD overlay.
+            - **DPAPI AES-256 Encryption**: Hardware-backed encrypted task storage.
+            
+            *Vibe Coded with Google DeepMind Gemini 3.8.*
