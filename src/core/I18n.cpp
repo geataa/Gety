@@ -37,7 +37,7 @@ void I18n::SetLanguageByCode(const std::wstring& code) {
             return;
         }
     }
-    m_currentLang = LangId::Turkish;
+    m_currentLang = LangId::English;
 }
 
 std::wstring I18n::GetCurrentLanguageCode() const {
@@ -46,7 +46,7 @@ std::wstring I18n::GetCurrentLanguageCode() const {
             return l.code;
         }
     }
-    return L"tr";
+    return L"en";
 }
 
 const wchar_t* I18n::Get(StrId id) const {

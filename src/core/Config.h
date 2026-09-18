@@ -37,7 +37,7 @@ public:
     bool autoShutdownOnComplete = false;
     bool minimizeToTrayOnClose = true;
     bool startWithWindows = false;
-    std::wstring language = L"tr";
+    std::wstring language = L"en";
     std::wstring huggingFaceToken;
 
     bool IsAutoStartEnabled() const;

@@ -1,4 +1,5 @@
 #include "Config.h"
+#include "I18n.h"
 #include <shlwapi.h>
 
 namespace Gety {
@@ -61,6 +62,7 @@ void Config::Load() {
 
     GetPrivateProfileStringW(L"General", L"Language", language.c_str(), buf, MAX_PATH, ini);
     language = buf;
+    I18n::Instance().SetLanguageByCode(language);
 
     wchar_t tokenBuf[1024] = { 0 };
     GetPrivateProfileStringW(L"AI", L"HuggingFaceToken", huggingFaceToken.c_str(), tokenBuf, 1024, ini);

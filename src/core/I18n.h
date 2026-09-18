@@ -288,7 +288,7 @@ private:
 
     void InitStrings();
 
-    LangId m_currentLang = LangId::Turkish;
+    LangId m_currentLang = LangId::English;
     std::vector<LanguageInfo> m_languages;
     std::unordered_map<LangId, std::unordered_map<StrId, std::wstring>> m_translations;
 };

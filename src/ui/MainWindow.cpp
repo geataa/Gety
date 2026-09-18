@@ -1051,7 +1051,8 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
         t1.currentSpeedBps = 12.4 * 1024 * 1024;
         t1.splitCount = 10;
         t1.state = DownloadState::Downloading;
-        t1.category = L"Yazılım";
+        bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
+        t1.category = isTr ? L"Yazılım" : L"Software";
         t1.supportsResume = true;
         t1.addedDate = L"2026-09-07 20:15";
 
@@ -1067,14 +1068,25 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
             t1.segments.push_back(seg);
         }
 
-        t1.logs = {
-            { L"02:15:01", L"Bağlantı kuruluyor: releases.ubuntu.com:443", 0 },
-            { L"02:15:02", L"HTTP 200 OK. Sunucu Range (Resume) desteğini onayladı.", 1 },
-            { L"02:15:02", L"Dosya boyutu tespit edildi: 5.64 GB (5,780,275,200 bayt)", 0 },
-            { L"02:15:03", L"10 eşzamanlı multi-chunk indirme thread'i başlatıldı.", 1 },
-            { L"02:15:10", L"Segment #1 tamamlandı, yeni dinamik aralık birleştiriliyor.", 1 },
-            { L"02:15:30", L"Anlık maksimum bant genişliğine ulaşıldı: 14.80 MB/s", 0 }
-        };
+        if (isTr) {
+            t1.logs = {
+                { L"02:15:01", L"Bağlantı kuruluyor: releases.ubuntu.com:443", 0 },
+                { L"02:15:02", L"HTTP 200 OK. Sunucu Range (Resume) desteğini onayladı.", 1 },
+                { L"02:15:02", L"Dosya boyutu tespit edildi: 5.64 GB (5,780,275,200 bayt)", 0 },
+                { L"02:15:03", L"10 eşzamanlı multi-chunk indirme thread'i başlatıldı.", 1 },
+                { L"02:15:10", L"Segment #1 tamamlandı, yeni dinamik aralık birleştiriliyor.", 1 },
+                { L"02:15:30", L"Anlık maksimum bant genişliğine ulaşıldı: 14.80 MB/s", 0 }
+            };
+        } else {
+            t1.logs = {
+                { L"02:15:01", L"Connecting to: releases.ubuntu.com:443", 0 },
+                { L"02:15:02", L"HTTP 200 OK. Server confirmed Range (Resume) support.", 1 },
+                { L"02:15:02", L"Content length detected: 5.64 GB (5,780,275,200 bytes)", 0 },
+                { L"02:15:03", L"10 parallel multi-chunk streaming threads started.", 1 },
+                { L"02:15:10", L"Segment #1 completed, merging dynamic byte range.", 1 },
+                { L"02:15:30", L"Peak bandwidth achieved: 14.80 MB/s", 0 }
+            };
+        }
 
         DownloadTaskInfo t2;
         t2.id = L"task-vscode";
@@ -1082,7 +1094,7 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
         t2.filename = L"VSCodeUserSetup-x64-1.93.1.exe";
         t2.saveDirectory = L"C:\\Downloads\\Programs";
         t2.fullPath = L"C:\\Downloads\\Programs\\VSCodeUserSetup-x64-1.93.1.exe";
-        t2.category = L"Yazılım";
+        t2.category = isTr ? L"Yazılım" : L"Software";
         t2.totalBytes = 94ULL * 1024 * 1024;
         t2.downloadedBytes = 94ULL * 1024 * 1024;
         t2.state = DownloadState::Completed;
@@ -1098,7 +1110,7 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
         t3.filename = L"Cyberpunk_2077_Original_Soundtrack.flac";
         t3.saveDirectory = L"C:\\Downloads\\Music";
         t3.fullPath = L"C:\\Downloads\\Music\\Cyberpunk_2077_Original_Soundtrack.flac";
-        t3.category = L"Müzik";
+        t3.category = isTr ? L"Müzik" : L"Music";
         t3.totalBytes = 420ULL * 1024 * 1024;
         t3.downloadedBytes = 115ULL * 1024 * 1024;
         t3.state = DownloadState::Paused;

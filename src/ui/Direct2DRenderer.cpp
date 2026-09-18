@@ -409,11 +409,12 @@ void Direct2DRenderer::UpdateLayout(int width, int height, int splitterX, int sp
     }
 
     // Setup Detail Tabs
+    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
     m_detailTabs = {
-        { DetailTab::Matrix, L"Blok Grafiği", L"🔲" },
-        { DetailTab::Segments, L"Segmentler", L"📊" },
-        { DetailTab::Logs, L"Günlük (Log)", L"📝" },
-        { DetailTab::Info, L"Dosya Bilgisi", L"ℹ" }
+        { DetailTab::Matrix, isTr ? L"Blok Grafiği" : L"Block Matrix", L"🔲" },
+        { DetailTab::Segments, isTr ? L"Segmentler" : L"Segments", L"📊" },
+        { DetailTab::Logs, isTr ? L"Günlük (Log)" : L"Connection Log", L"📝" },
+        { DetailTab::Info, isTr ? L"Dosya Bilgisi" : L"Task Info", L"ℹ" }
     };
 
     float tabX = rightCardsL + 8.0f * m_dpiScale;
@@ -860,7 +861,8 @@ void Direct2DRenderer::RenderCategoryCard(const std::vector<DownloadTaskInfo>& t
         m_rcCategoryCard.right - 10.0f * m_dpiScale,
         m_rcCategoryCard.top + 24.0f * m_dpiScale
     );
-    DrawTextLeft(L"📁 KATEGORİLER", headerRect, m_pFormatSemiBold, m_pMutedTextBrush);
+    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
+    DrawTextLeft(isTr ? L"📁 KATEGORİLER" : L"📁 CATEGORIES", headerRect, m_pFormatSemiBold, m_pMutedTextBrush);
 
     int countAll = static_cast<int>(tasks.size());
     int countUnfinished = 0;
@@ -1311,17 +1313,18 @@ void Direct2DRenderer::RenderChunkMatrix(const DownloadTaskInfo& task, const D2D
     D2D1_RECT_F statsRightR = D2D1::RectF(contentRect.left + totalW * 0.45f, contentRect.top,
                                           contentRect.right - 8.0f * m_dpiScale, contentRect.top + statsH);
 
+    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
     wchar_t statsLeftBuf[128];
     if (task.totalBytes > 0) {
-        swprintf_s(statsLeftBuf, L"■ %d Blok  (1 Blok = %s)", totalBlocks, FormatBytes(bytesPerBlock).c_str());
+        swprintf_s(statsLeftBuf, isTr ? L"■ %d Blok  (1 Blok = %s)" : L"■ %d Blocks  (1 Block = %s)", totalBlocks, FormatBytes(bytesPerBlock).c_str());
     } else {
-        swprintf_s(statsLeftBuf, L"■ %d Blok  (Boyut hesaplanıyor...)", totalBlocks);
+        swprintf_s(statsLeftBuf, isTr ? L"■ %d Blok  (Boyut hesaplanıyor...)" : L"■ %d Blocks  (Calculating size...)", totalBlocks);
     }
     DrawTextLeft(statsLeftBuf, statsLeftR, m_pFormatSmall, m_pMutedTextBrush);
 
     wchar_t statsRightBuf[128];
     double pct = (totalBlocks > 0) ? ((double)doneCount * 100.0 / totalBlocks) : 0.0;
-    swprintf_s(statsRightBuf, L"Biten: %d/%d (%%%0.1f)  •  %d Aktif Parça", doneCount, totalBlocks, pct, activeCount);
+    swprintf_s(statsRightBuf, isTr ? L"Biten: %d/%d (%%%0.1f)  •  %d Aktif Parça" : L"Done: %d/%d (%.1f%%)  •  %d Active Parts", doneCount, totalBlocks, pct, activeCount);
     DrawTextRight(statsRightBuf, statsRightR, m_pFormatSmall, m_pCyanBrush);
 
     // Separator line
@@ -1415,9 +1418,9 @@ void Direct2DRenderer::RenderChunkMatrix(const DownloadTaskInfo& task, const D2D
     };
 
     float legX = contentRect.left + 4.0f * m_dpiScale;
-    drawLegendItem(legX, m_pGreenBrush, L"Tamamlandı");
-    drawLegendItem(legX + 120.0f * m_dpiScale, m_pCyanBrush, L"İndiriliyor (Aktif)");
-    drawLegendItem(legX + 250.0f * m_dpiScale, m_pPendingBlockBrush, L"Bekliyor (Kuyrukta)");
+    drawLegendItem(legX, m_pGreenBrush, isTr ? L"Tamamlandı" : L"Completed");
+    drawLegendItem(legX + 120.0f * m_dpiScale, m_pCyanBrush, isTr ? L"İndiriliyor (Aktif)" : L"Downloading (Active)");
+    drawLegendItem(legX + 265.0f * m_dpiScale, m_pPendingBlockBrush, isTr ? L"Bekliyor (Kuyrukta)" : L"Pending (Queued)");
 }
 
 void Direct2DRenderer::RenderSegments(const DownloadTaskInfo& task, const D2D1_RECT_F& contentRect) {
@@ -1556,19 +1559,21 @@ void Direct2DRenderer::RenderBottomBar(
     double dlMB = (double)totalBytesDownloaded / (1024.0 * 1024.0);
     double totMB = (double)totalBytesAll / (1024.0 * 1024.0);
 
-    swprintf_s(statusBuf, L"⚡ Gety v1.0   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB",
+    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
+    swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.0   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                 L"⚡ Gety v1.0   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB",
         activeTasksCount,
         speedMB,
         dlMB,
         totMB
     );
 
-    float rightWidth = 150.0f * m_dpiScale;
+    float rightWidth = 165.0f * m_dpiScale;
     D2D1_RECT_F leftTextR = D2D1::RectF(m_rcBottomBar.left + 12.0f * m_dpiScale, m_rcBottomBar.top, m_rcBottomBar.right - rightWidth - 8.0f * m_dpiScale, m_rcBottomBar.bottom);
     DrawTextLeft(statusBuf, leftTextR, m_pFormatSmall, m_pTextBrush);
 
     D2D1_RECT_F rightTextR = D2D1::RectF(m_rcBottomBar.right - rightWidth, m_rcBottomBar.top, m_rcBottomBar.right - 12.0f * m_dpiScale, m_rcBottomBar.bottom);
-    DrawTextRight(L"🎛 Sınırsız Hız Modu", rightTextR, m_pFormatSemiBold, m_pCyanBrush);
+    DrawTextRight(isTr ? L"🎛 Sınırsız Hız Modu" : L"🎛 Unlimited Speed", rightTextR, m_pFormatSemiBold, m_pCyanBrush);
 }
 
 bool Direct2DRenderer::SaveSnapshot(

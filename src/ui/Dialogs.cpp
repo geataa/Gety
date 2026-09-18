@@ -2248,7 +2248,8 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 WS_CHILD | WS_VISIBLE | SS_LEFT | SS_ENDELLIPSIS | SS_NOPREFIX, 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SendMessageW(pData->hwndStatus, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
 
-            pData->hwndLblFormat = CreateWindowExW(0, L"STATIC", L"İndirme Formatı Seçin:",
+            bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
+            pData->hwndLblFormat = CreateWindowExW(0, L"STATIC", isTr ? L"İndirme Formatı Seçin:" : L"Select Download Format:",
                 WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SendMessageW(pData->hwndLblFormat, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
 
@@ -2280,7 +2281,8 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 WS_CHILD | WS_VISIBLE | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SendMessageW(pData->hwndLblDetails, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
 
-            pData->hwndDetails = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"Model adını girip 'Modeli İncele' butonuna basın.",
+            pData->hwndDetails = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT",
+                isTr ? L"Model adını girip 'Modeli İncele' butonuna basın." : L"Enter model name and click 'Inspect Model'.",
                 WS_CHILD | WS_VISIBLE | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP,
                 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SetWindowTheme(pData->hwndDetails, L"DarkMode_Explorer", NULL);
@@ -2335,7 +2337,8 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                 WS_CHILD | SS_LEFT | SS_NOPREFIX, 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SendMessageW(pData->hwndLblHfDetails, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
 
-            pData->hwndHfDetails = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"Model deposunu girip 'Modeli İncele' butonuna basın.",
+            pData->hwndHfDetails = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT",
+                isTr ? L"Model deposunu girip 'Modeli İncele' butonuna basın." : L"Enter repository (e.g. TheBloke/Mistral-7B-Instruct-v0.2-GGUF) and click 'Inspect Model'.",
                 WS_CHILD | ES_MULTILINE | ES_AUTOVSCROLL | ES_READONLY | WS_VSCROLL | WS_TABSTOP,
                 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
             SetWindowTheme(pData->hwndHfDetails, L"DarkMode_Explorer", NULL);
@@ -2366,7 +2369,7 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
             const int partOptions[] = { 1, 2, 4, 8, 10, 16, 24, 30 };
             int selIdx = 4; // default 10
             for (size_t i = 0; i < _countof(partOptions); ++i) {
-                std::wstring text = std::to_wstring(partOptions[i]) + L" Parça";
+                std::wstring text = std::to_wstring(partOptions[i]) + (isTr ? L" Parça" : L" Parts");
                 SendMessageW(pData->hwndComboParts, CB_ADDSTRING, 0, (LPARAM)text.c_str());
                 if (partOptions[i] == pData->splitParts) selIdx = (int)i;
             }
@@ -2417,22 +2420,23 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
 
                 if (pData->fetchResult.success) {
                     if (pData->activeTab == 0) EnableWindow(pData->hwndBtnOk, TRUE);
+                    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
                     std::wstring statusText = L"✔ " + pData->fetchResult.info.spec.displayName +
                         L"  (" + OllamaClient::FormatBytes(pData->fetchResult.info.totalSize) +
-                        L", " + std::to_wstring(pData->fetchResult.info.layers.size()) + L" Katman)";
+                        L", " + std::to_wstring(pData->fetchResult.info.layers.size()) + (isTr ? L" Katman)" : L" Layers)");
                     SetWindowTextW(pData->hwndStatus, statusText.c_str());
 
                     std::wstring details;
-                    details += L"Model: " + pData->fetchResult.info.spec.fullName + L"\r\n";
-                    details += L"Toplam Boyut: " + OllamaClient::FormatBytes(pData->fetchResult.info.totalSize) + L"\r\n";
-                    details += L"Katman Sayısı: " + std::to_wstring(pData->fetchResult.info.layers.size()) + L"\r\n";
+                    details += (isTr ? L"Model: " : L"Model: ") + pData->fetchResult.info.spec.fullName + L"\r\n";
+                    details += (isTr ? L"Toplam Boyut: " : L"Total Size: ") + OllamaClient::FormatBytes(pData->fetchResult.info.totalSize) + L"\r\n";
+                    details += (isTr ? L"Katman Sayısı: " : L"Layers Count: ") + std::to_wstring(pData->fetchResult.info.layers.size()) + L"\r\n";
                     if (pData->fetchResult.info.ggufLayerIndex >= 0) {
-                        details += L"GGUF Katman Boyutu: " + OllamaClient::FormatBytes(pData->fetchResult.info.ggufSize) + L"\r\n";
+                        details += (isTr ? L"GGUF Katman Boyutu: " : L"GGUF Layer Size: ") + OllamaClient::FormatBytes(pData->fetchResult.info.ggufSize) + L"\r\n";
                     }
-                    details += L"\r\n--- KATMAN LİSTESİ ---\r\n";
+                    details += isTr ? L"\r\n--- KATMAN LİSTESİ ---\r\n" : L"\r\n--- LAYERS LIST ---\r\n";
                     for (size_t i = 0; i < pData->fetchResult.info.layers.size(); ++i) {
                         const auto& l = pData->fetchResult.info.layers[i];
-                        details += std::to_wstring(i + 1) + L". " + (l.isModel ? L"[MODEL GGUF] " : L"[KATMAN] ") +
+                        details += std::to_wstring(i + 1) + L". " + (l.isModel ? L"[MODEL GGUF] " : (isTr ? L"[KATMAN] " : L"[LAYER] ")) +
                             l.targetFilename + L" (" + OllamaClient::FormatBytes(l.size) + L")\r\n";
                         details += L"    SHA256: " + OllamaClient::Utf8ToWide(l.digest) + L"\r\n";
                     }
@@ -2479,6 +2483,7 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
 
                 if (pData->hfFetchResult.success && !pData->hfFetchResult.info.files.empty()) {
                     if (pData->activeTab == 1) EnableWindow(pData->hwndBtnOk, TRUE);
+                    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
 
                     SendMessageW(pData->hwndComboHfFiles, CB_RESETCONTENT, 0, 0);
                     for (size_t i = 0; i < pData->hfFetchResult.info.files.size(); ++i) {
@@ -2487,7 +2492,7 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                         if (f.isGguf) {
                             if (!f.quantType.empty()) itemText += L"  [" + f.quantType + L"]";
                             if (f.qualityStars > 0) itemText += L"  " + HuggingFaceClient::FormatStars(f.qualityStars);
-                            if (f.isRecommended) itemText += L"  ⭐ (Önerilen)";
+                            if (f.isRecommended) itemText += isTr ? L"  ⭐ (Önerilen)" : L"  ⭐ (Recommended)";
                         } else if (f.isSafetensors) {
                             itemText += L"  [Safetensors]";
                         }
@@ -2500,33 +2505,33 @@ static LRESULT CALLBACK ModelDownloaderDlgProc(HWND hwnd, UINT msg, WPARAM wPara
                     SetWindowTextW(pData->hwndHfFilename, pData->hfFetchResult.info.files[sel].filename.c_str());
 
                     std::wstring statusText = L"✔ " + pData->hfFetchResult.info.spec.displayName +
-                        L"  (" + std::to_wstring(pData->hfFetchResult.info.files.size()) + L" Dosya, " +
+                        L"  (" + std::to_wstring(pData->hfFetchResult.info.files.size()) + (isTr ? L" Dosya, " : L" Files, ") +
                         HuggingFaceClient::FormatBytes(pData->hfFetchResult.info.totalSize) + L")";
                     SetWindowTextW(pData->hwndHfStatus, statusText.c_str());
 
                     std::wstring details;
-                    details += L"Depo: " + pData->hfFetchResult.info.spec.repoId + L"\r\n";
-                    details += L"Dal / Revizyon: " + pData->hfFetchResult.info.spec.revision + L"\r\n";
-                    details += L"Toplam Boyut: " + HuggingFaceClient::FormatBytes(pData->hfFetchResult.info.totalSize) + L"\r\n";
-                    details += L"Toplam Dosya: " + std::to_wstring(pData->hfFetchResult.info.files.size()) +
+                    details += (isTr ? L"Depo: " : L"Repository: ") + pData->hfFetchResult.info.spec.repoId + L"\r\n";
+                    details += (isTr ? L"Dal / Revizyon: " : L"Branch / Revision: ") + pData->hfFetchResult.info.spec.revision + L"\r\n";
+                    details += (isTr ? L"Toplam Boyut: " : L"Total Size: ") + HuggingFaceClient::FormatBytes(pData->hfFetchResult.info.totalSize) + L"\r\n";
+                    details += (isTr ? L"Toplam Dosya: " : L"Total Files: ") + std::to_wstring(pData->hfFetchResult.info.files.size()) +
                         L" (GGUF: " + std::to_wstring(pData->hfFetchResult.info.totalGgufCount) +
                         L", Safetensors: " + std::to_wstring(pData->hfFetchResult.info.totalSafetensorsCount) + L")\r\n";
 
                     if (pData->hfFetchResult.info.hasGguf) {
-                        details += L"\r\n--- GGUF NİCELLEŞTİRME & KALİTE TABLOSU ---\r\n";
+                        details += isTr ? L"\r\n--- GGUF NİCELLEŞTİRME & KALİTE TABLOSU ---\r\n" : L"\r\n--- GGUF QUANTIZATION & QUALITY TABLE ---\r\n";
                         for (const auto& f : pData->hfFetchResult.info.files) {
                             if (f.isGguf) {
                                 details += L"• " + f.filename + L"\r\n";
-                                details += L"   Boyut: " + HuggingFaceClient::FormatBytes(f.size) +
-                                    L" | Kalite: " + HuggingFaceClient::FormatStars(f.qualityStars);
+                                details += (isTr ? L"   Boyut: " : L"   Size: ") + HuggingFaceClient::FormatBytes(f.size) +
+                                    (isTr ? L" | Kalite: " : L" | Quality: ") + HuggingFaceClient::FormatStars(f.qualityStars);
                                 if (!f.description.empty()) details += L" (" + f.description + L")";
-                                if (f.isRecommended) details += L" [ÖNERİLEN]";
+                                if (f.isRecommended) details += isTr ? L" [ÖNERİLEN]" : L" [RECOMMENDED]";
                                 details += L"\r\n";
                             }
                         }
                     }
 
-                    details += L"\r\n--- TÜM DEPO DOSYALARI ---\r\n";
+                    details += isTr ? L"\r\n--- TÜM DEPO DOSYALARI ---\r\n" : L"\r\n--- ALL REPOSITORY FILES ---\r\n";
                     for (size_t i = 0; i < pData->hfFetchResult.info.files.size(); ++i) {
                         const auto& f = pData->hfFetchResult.info.files[i];
                         details += std::to_wstring(i + 1) + L". " + f.filename + L" (" + HuggingFaceClient::FormatBytes(f.size) + L")\r\n";

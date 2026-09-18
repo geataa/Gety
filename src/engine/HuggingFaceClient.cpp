@@ -1,5 +1,6 @@
 #include "HuggingFaceClient.h"
 #include "../core/JsonParser.h"
+#include "../core/I18n.h"
 #include "WinHttpUtils.h"
 #include <winhttp.h>
 #include <sstream>
@@ -83,50 +84,52 @@ void HuggingFaceClient::AnalyzeQuantization(const std::wstring& filename,
     struct QuantDef {
         const wchar_t* tag;
         int stars;
-        const wchar_t* desc;
+        const wchar_t* descTr;
+        const wchar_t* descEn;
         bool isRecommended;
     };
 
     static const QuantDef quantDefs[] = {
         // High-quality K-quants & recommended
-        { L"Q4_K_M", 4, L"Önerilen (Hız, boyut ve kalite dengesi)", true },
-        { L"Q4_K_XL", 4, L"Önerilen Yüksek Kalite", true },
-        { L"Q5_K_M", 5, L"Çok Yüksek Kalite (Düşük kayıp)", false },
-        { L"Q8_0",   5, L"En Yüksek Kalite (Neredeyse kayıpsız 8-bit)", false },
-        { L"Q6_K",   5, L"Çok Yüksek Kalite (6-bit)", false },
-        { L"Q5_K_S", 4, L"Yüksek Kalite (Kompakt 5-bit)", false },
-        { L"Q4_K_S", 4, L"İyi Kalite (Q4_K_M'den biraz daha küçük)", false },
+        { L"Q4_K_M", 4, L"Önerilen (Hız, boyut ve kalite dengesi)", L"Recommended (Best speed, size & quality balance)", true },
+        { L"Q4_K_XL", 4, L"Önerilen Yüksek Kalite", L"Recommended High Quality", true },
+        { L"Q5_K_M", 5, L"Çok Yüksek Kalite (Düşük kayıp)", L"Very High Quality (Low loss)", false },
+        { L"Q8_0",   5, L"En Yüksek Kalite (Neredeyse kayıpsız 8-bit)", L"Highest Quality (Near lossless 8-bit)", false },
+        { L"Q6_K",   5, L"Çok Yüksek Kalite (6-bit)", L"Very High Quality (6-bit)", false },
+        { L"Q5_K_S", 4, L"Yüksek Kalite (Kompakt 5-bit)", L"High Quality (Compact 5-bit)", false },
+        { L"Q4_K_S", 4, L"İyi Kalite (Q4_K_M'den biraz daha küçük)", L"Good Quality (Slightly smaller than Q4_K_M)", false },
 
         // i-Matrix quants
-        { L"IQ4_NL", 4, L"Modern i-Matrix Kalite (Önerilen)", false },
-        { L"IQ4_XS", 4, L"Modern i-Matrix Kompakt", false },
-        { L"IQ3_M",  3, L"i-Matrix Dengeli (3-bit)", false },
-        { L"IQ3_S",  3, L"i-Matrix Kompakt (3-bit)", false },
-        { L"IQ3_XXS", 2, L"i-Matrix Küçük (Düşük VRAM)", false },
-        { L"IQ2_M",  2, L"i-Matrix Ultra Küçük", false },
-        { L"IQ2_S",  2, L"i-Matrix Ultra Küçük", false },
-        { L"IQ2_XXS", 1, L"i-Matrix Ekstrem Küçük", false },
-        { L"IQ1_S",  1, L"1-Bit Ekstrem Sıkıştırma", false },
-        { L"IQ1_M",  1, L"1-Bit Ekstrem Sıkıştırma", false },
+        { L"IQ4_NL", 4, L"Modern i-Matrix Kalite (Önerilen)", L"Modern i-Matrix Quality (Recommended)", false },
+        { L"IQ4_XS", 4, L"Modern i-Matrix Kompakt", L"Modern i-Matrix Compact", false },
+        { L"IQ3_M",  3, L"i-Matrix Dengeli (3-bit)", L"i-Matrix Balanced (3-bit)", false },
+        { L"IQ3_S",  3, L"i-Matrix Kompakt (3-bit)", L"i-Matrix Compact (3-bit)", false },
+        { L"IQ3_XXS", 2, L"i-Matrix Küçük (Düşük VRAM)", L"i-Matrix Small (Low VRAM)", false },
+        { L"IQ2_M",  2, L"i-Matrix Ultra Küçük", L"i-Matrix Ultra Small", false },
+        { L"IQ2_S",  2, L"i-Matrix Ultra Küçük", L"i-Matrix Ultra Small", false },
+        { L"IQ2_XXS", 1, L"i-Matrix Ekstrem Küçük", L"i-Matrix Extreme Small", false },
+        { L"IQ1_S",  1, L"1-Bit Ekstrem Sıkıştırma", L"1-Bit Extreme Compression", false },
+        { L"IQ1_M",  1, L"1-Bit Ekstrem Sıkıştırma", L"1-Bit Extreme Compression", false },
 
         // Legacy / standard quants
-        { L"Q5_0",   4, L"Standart 5-bit", false },
-        { L"Q5_1",   4, L"Standart 5-bit", false },
-        { L"Q4_0",   3, L"Standart 4-bit (Temel)", false },
-        { L"Q4_1",   3, L"Standart 4-bit", false },
-        { L"Q3_K_L", 3, L"Orta Kalite (3-bit)", false },
-        { L"Q3_K_M", 3, L"Orta Kalite (3-bit)", false },
-        { L"Q3_K_S", 2, L"Düşük Kalite (Kayıplı)", false },
-        { L"Q2_K",   1, L"Çok Düşük Kalite (Acil durum / minimal RAM)", false },
+        { L"Q5_0",   4, L"Standart 5-bit", L"Standard 5-bit", false },
+        { L"Q5_1",   4, L"Standart 5-bit", L"Standard 5-bit", false },
+        { L"Q4_0",   3, L"Standart 4-bit (Temel)", L"Standard 4-bit (Basic)", false },
+        { L"Q4_1",   3, L"Standart 4-bit", L"Standard 4-bit", false },
+        { L"Q3_K_L", 3, L"Orta Kalite (3-bit)", L"Medium Quality (3-bit)", false },
+        { L"Q3_K_M", 3, L"Orta Kalite (3-bit)", L"Medium Quality (3-bit)", false },
+        { L"Q3_K_S", 2, L"Düşük Kalite (Kayıplı)", L"Low Quality (Lossy)", false },
+        { L"Q2_K",   1, L"Çok Düşük Kalite (Acil durum / minimal RAM)", L"Very Low Quality (Minimal RAM)", false },
 
         // Full precision
-        { L"BF16",   5, L"Orijinal BFloat16 Hassasiyet", false },
-        { L"FP16",   5, L"Orijinal Float16 Hassasiyet", false },
-        { L"F16",    5, L"Orijinal Float16 Hassasiyet", false },
-        { L"FP32",   5, L"Tam Hassasiyet Float32", false },
-        { L"F32",    5, L"Tam Hassasiyet Float32", false }
+        { L"BF16",   5, L"Orijinal BFloat16 Hassasiyet", L"Original BFloat16 Precision", false },
+        { L"FP16",   5, L"Orijinal Float16 Hassasiyet", L"Original Float16 Precision", false },
+        { L"F16",    5, L"Orijinal Float16 Hassasiyet", L"Original Float16 Precision", false },
+        { L"FP32",   5, L"Tam Hassasiyet Float32", L"Full Precision Float32", false },
+        { L"F32",    5, L"Tam Hassasiyet Float32", L"Full Precision Float32", false }
     };
 
+    bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
     for (const auto& q : quantDefs) {
         // Search as a token with delimiters or prefix/suffix
         size_t pos = upper.find(q.tag);
@@ -137,7 +140,7 @@ void HuggingFaceClient::AnalyzeQuantization(const std::wstring& filename,
             if (leftOk && rightOk) {
                 outQuant = q.tag;
                 outStars = q.stars;
-                outDescription = q.desc;
+                outDescription = isTr ? q.descTr : q.descEn;
                 outIsRecommended = q.isRecommended;
                 return;
             }
