@@ -1,0 +1,73 @@
+#include <windows.h>
+#include "resource.h"
+
+// Icons
+IDI_APP_ICON    ICON    "icons/app.ico"
+IDI_TRAY_ICON   ICON    "icons/app.ico"
+
+// Main Menu
+IDR_MAIN_MENU MENU
+BEGIN
+    POPUP "&Dosya"
+    BEGIN
+        MENUITEM "&Yeni İndirme...\tCtrl+N",    ID_FILE_NEW
+        MENUITEM "&Toplu İndirme...\tCtrl+B",  ID_FILE_BATCH_NEW
+        MENUITEM "🎬 &Video / Medya Linki Ekle...\tCtrl+L", ID_FILE_VIDEO_LINK
+        MENUITEM "🤖 &Yapay Zeka / Ollama Modeli İndir...\tCtrl+M", ID_FILE_OLLAMA_MODEL
+        MENUITEM "🤗 &Hugging Face Modeli İndir...\tCtrl+H", ID_FILE_HF_MODEL
+        MENUITEM SEPARATOR
+        MENUITEM "Çı&kış\tAlt+F4",             ID_FILE_EXIT
+    END
+    POPUP "&Görev"
+    BEGIN
+        MENUITEM "&Başlat\tF5",                ID_DOWNLOAD_START
+        MENUITEM "&Duraklat\tF6",              ID_DOWNLOAD_PAUSE
+        MENUITEM "&Durdur",                    ID_DOWNLOAD_STOP
+        MENUITEM SEPARATOR
+        MENUITEM "Dosyayı &Aç",                ID_DOWNLOAD_OPENFILE
+        MENUITEM "Klasörü &Aç",                ID_DOWNLOAD_OPENFOLDER
+        MENUITEM SEPARATOR
+        MENUITEM "&Yeniden İndir",             ID_DOWNLOAD_REDOWNLOAD
+        MENUITEM "&Sil\tDel",                  ID_DOWNLOAD_DELETE
+        MENUITEM SEPARATOR
+        MENUITEM "&Yukarı Taşı",               ID_DOWNLOAD_MOVEUP
+        MENUITEM "&Aşağı Taşı",                ID_DOWNLOAD_MOVEDOWN
+    END
+    POPUP "&Görünüm"
+    BEGIN
+        MENUITEM "&Kayan İndirme Hedefi (Drop Zone)", ID_VIEW_DROPZONE, CHECKED
+        MENUITEM "&Araç Çubuğu",               ID_VIEW_TOOLBAR, CHECKED
+        MENUITEM "&Durum Çubuğu",              ID_VIEW_STATUSBAR, CHECKED
+        MENUITEM "&Kategori Ağacı",            ID_VIEW_TREEVIEW, CHECKED
+    END
+    POPUP "&Araçlar"
+    BEGIN
+        MENUITEM "&Pano İzleyici (Otomatik URL Yakala)", ID_TOOLS_CLIPBOARD, CHECKED
+        MENUITEM SEPARATOR
+        POPUP "&Hız Modu"
+        BEGIN
+            MENUITEM "&Sınırsız (Maksimum Hız)",       ID_TOOLS_SPEED_UNLIM, CHECKED
+            MENUITEM "&Manuel Limit",                  ID_TOOLS_SPEED_MANUAL
+            MENUITEM "&Arka Plan Modu",                ID_TOOLS_SPEED_BACK
+        END
+        MENUITEM SEPARATOR
+        MENUITEM "&Seçenekler (Ayarlar)...",           ID_TOOLS_OPTIONS
+    END
+    POPUP "&Yardım"
+    BEGIN
+        MENUITEM "&Gety Hakkında", ID_HELP_ABOUT
+    END
+END
+
+// Keyboard Accelerators
+IDR_ACCELERATOR ACCELERATORS
+BEGIN
+    "N",    ID_FILE_NEW,            VIRTKEY, CONTROL
+    "B",    ID_FILE_BATCH_NEW,      VIRTKEY, CONTROL
+    "L",    ID_FILE_VIDEO_LINK,     VIRTKEY, CONTROL
+    "M",    ID_FILE_OLLAMA_MODEL,   VIRTKEY, CONTROL
+    "H",    ID_FILE_HF_MODEL,       VIRTKEY, CONTROL
+    VK_F5,  ID_DOWNLOAD_START,      VIRTKEY
+    VK_F6,  ID_DOWNLOAD_PAUSE,      VIRTKEY
+    VK_DELETE, ID_DOWNLOAD_DELETE,  VIRTKEY
+END

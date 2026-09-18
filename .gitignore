@@ -1,0 +1,126 @@
+# ==============================================================================
+# Gety Git Ignore Rules
+# Ultra-Fast Portable Download Manager for Windows
+# ==============================================================================
+
+# ------------------------------------------------------------------------------
+# 1. Private User Data, Tasks & Configuration (CRITICAL - NEVER COMMIT)
+# ------------------------------------------------------------------------------
+portable_data/
+Downloads/
+downloads/
+*.dat
+*.state
+*.part
+*.gety
+*.gety.state
+*.crdownload
+tasks.json
+tasks.enc.json
+Gety.ini
+
+# ------------------------------------------------------------------------------
+# 2. Private Credentials, Secrets & Tokens (NEVER COMMIT)
+# ------------------------------------------------------------------------------
+.env
+.env.*
+*.env
+*.key
+*.pem
+*.cert
+*.crt
+*.pfx
+*.p12
+*.token
+*.secret
+*.credentials
+cookies.txt
+*cookies*.txt
+
+# ------------------------------------------------------------------------------
+# 3. AI Models & Large Binary Weights
+# ------------------------------------------------------------------------------
+*.gguf
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.ckpt
+Modelfile
+
+# ------------------------------------------------------------------------------
+# 4. Logs, Debug Transcripts & Crash Dumps
+# ------------------------------------------------------------------------------
+*.log
+*.jsonl
+*.dmp
+*.dump
+*.trace
+snapshot_debug.log
+
+# ------------------------------------------------------------------------------
+# 5. Build Artifacts & Binaries
+# ------------------------------------------------------------------------------
+build/
+bin/
+out/
+Release/
+Debug/
+x64/
+x86/
+ARM64/
+
+*.exe
+*.dll
+*.obj
+*.pdb
+*.ilk
+*.lib
+*.exp
+*.map
+
+# ------------------------------------------------------------------------------
+# 6. IDEs & Editor Configuration
+# ------------------------------------------------------------------------------
+.vs/
+.vscode/
+.idea/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.suo
+*.user
+*.swp
+*~
+
+# ------------------------------------------------------------------------------
+# 7. OS Generated Metadata
+# ------------------------------------------------------------------------------
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+desktop.ini
+$RECYCLE.BIN/
+.DS_Store
+
+# ------------------------------------------------------------------------------
+# 8. Temporary & Snapshot Images
+# ------------------------------------------------------------------------------
+*.png
+!resources/icons/*.png
+!docs/screenshots/*.png
+*.jpg
+*.jpeg
+*.bmp
+*.ico
+!resources/icons/*.ico
+
+# ------------------------------------------------------------------------------
+# 9. Python Caches (if helper scripts used)
+# ------------------------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*$py.class
