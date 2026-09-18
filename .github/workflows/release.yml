@@ -33,16 +33,24 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up MSVC Developer Prompt
-        uses: ilammy/msvc-dev-cmd@v1
-        with:
-          arch: x64
-
       - name: Configure CMake
         shell: pwsh
         run: |
           if (Test-Path build) { Remove-Item -Recurse -Force build }
-          cmake -B build -G "Visual Studio 17 2022" -A x64
+          $log = cmake -B build -G "Visual Studio 17 2022" -A x64 2>&1
+          $log | Out-File -FilePath cmake_log.txt -Encoding utf8
+          $log
+          if ($LASTEXITCODE -ne 0) {
+            Write-Error "CMake configuration failed with exit code $LASTEXITCODE"
+            exit $LASTEXITCODE
+          }
+
+      - name: Upload CMake Log on Failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cmake-configuration-log
+          path: cmake_log.txt
 
       - name: Build Gety & Tests (Release)
         shell: pwsh
