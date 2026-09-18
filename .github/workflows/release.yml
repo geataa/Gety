@@ -34,23 +34,26 @@ jobs:
           fetch-depth: 0
 
       - name: Configure CMake
-        shell: pwsh
+        shell: cmd
         run: |
-          if (Test-Path build) { Remove-Item -Recurse -Force build }
-          $log = cmake -B build -G "Visual Studio 17 2022" -A x64 2>&1
-          $log | Out-File -FilePath cmake_log.txt -Encoding utf8
-          $log
-          if ($LASTEXITCODE -ne 0) {
-            Write-Error "CMake configuration failed with exit code $LASTEXITCODE"
-            exit $LASTEXITCODE
-          }
+          if exist build rmdir /s /q build
+          cmake -B build -G "Visual Studio 17 2022" -A x64 > cmake_log.txt 2>&1
+          set CMAKE_ERR=%ERRORLEVEL%
+          type cmake_log.txt
+          exit /b %CMAKE_ERR%
 
-      - name: Upload CMake Log on Failure
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: cmake-configuration-log
-          path: cmake_log.txt
+      - name: Push CMake Log to debug-log branch
+        if: always()
+        shell: bash
+        run: |
+          if [ -f cmake_log.txt ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git checkout -B debug-log
+            git add -f cmake_log.txt
+            git commit -m "debug: CMake log [skip ci]" || true
+            git push -f origin debug-log || true
+          fi
 
       - name: Build Gety & Tests (Release)
         shell: pwsh
