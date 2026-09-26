@@ -26,6 +26,8 @@ public:
 
     static void ShowAboutDialog(HWND hParent);
     static bool ShowUpdateUrlDialog(HWND hParent, const std::wstring& currentUrl, std::wstring& outNewUrl);
+    static bool ShowRenameDialog(HWND hParent, const std::wstring& currentFilename, std::wstring& outNewFilename);
+    static bool ShowDeleteConfirmDialog(HWND hParent, int taskCount, bool& outDeleteFile, bool defaultDeleteFile = false);
 
     static void SetDialogSnapshotTarget(const std::wstring& path);
 };

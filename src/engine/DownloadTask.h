@@ -49,6 +49,7 @@ public:
     void LoadState();
     void SaveState();
     bool UpdateUrl(const std::wstring& newUrl);
+    bool Rename(const std::wstring& newFilename);
     void RestoreMetadata(const std::wstring& id,
                          DownloadState state,
                          const std::wstring& addedDate,
@@ -71,6 +72,7 @@ private:
     mutable std::recursive_mutex m_mutex;
     DownloadTaskInfo m_info;
     std::atomic<DownloadState> m_state = DownloadState::Queued;
+    std::atomic<bool> m_pauseRequested = false;
     bool m_customFilenameSet = false;
     int m_retryCount = 0;
 
@@ -84,6 +86,8 @@ private:
     HANDLE m_hFile = INVALID_HANDLE_VALUE;
     std::vector<std::unique_ptr<SegmentWorker>> m_workers;
     std::thread m_probeThread;
+    std::atomic<HINTERNET> m_hProbeSession = nullptr;
+    std::atomic<HINTERNET> m_hProbeRequest = nullptr;
     std::atomic<bool> m_isProbing = false;
     std::atomic<bool> m_isFinishing = false;
 

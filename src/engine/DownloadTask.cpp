@@ -139,6 +139,63 @@ bool DownloadTask::UpdateUrl(const std::wstring& newUrl) {
     return true;
 }
 
+bool DownloadTask::Rename(const std::wstring& newFilename) {
+    std::wstring clean = WinHttpUtils::CleanFilename(newFilename);
+    if (clean.empty()) return false;
+
+    DownloadState curState = m_state.load();
+    bool wasActive = (curState == DownloadState::Downloading || curState == DownloadState::Connecting);
+
+    if (wasActive) {
+        Pause();
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (clean == m_info.filename) {
+            if (wasActive) Start();
+            return true;
+        }
+
+        std::wstring oldFullPath = m_info.fullPath;
+        std::wstring newFullPath = m_info.saveDirectory + L"\\" + clean;
+        std::wstring oldTempPath = GetTempFilePath();
+
+        // Check if new destination file already exists and isn't the current file
+        if (PathFileExistsW(newFullPath.c_str()) && _wcsicmp(newFullPath.c_str(), oldFullPath.c_str()) != 0) {
+            if (wasActive) Start();
+            return false;
+        }
+
+        // Rename completed file on disk if exists
+        if (PathFileExistsW(oldFullPath.c_str())) {
+            MoveFileW(oldFullPath.c_str(), newFullPath.c_str());
+        }
+
+        m_info.filename = clean;
+        m_info.fullPath = newFullPath;
+        m_customFilenameSet = true;
+
+        // Rename .gety temp file if exists
+        std::wstring newTempPath = GetTempFilePath();
+        if (PathFileExistsW(oldTempPath.c_str())) {
+            MoveFileW(oldTempPath.c_str(), newTempPath.c_str());
+        }
+    }
+
+    AddLog(L"Dosya adı güncellendi: " + clean, 1);
+    SaveState();
+
+    if (wasActive) {
+        Start();
+    }
+
+    if (m_eventCb) {
+        m_eventCb(m_info.id);
+    }
+    return true;
+}
+
 DownloadTask::~DownloadTask() {
     Stop();
     if (m_probeThread.joinable()) {
@@ -263,6 +320,7 @@ void DownloadTask::Start() {
         m_retryCount = 0;
         m_isFinishing = false;
         m_isMediaCancelled = false;
+        m_pauseRequested = false;
         m_state = DownloadState::Connecting;
         AddLog(L"Video indirme işlemi başlatılıyor...", 0);
 
@@ -273,6 +331,7 @@ void DownloadTask::Start() {
         return;
     }
 
+    m_pauseRequested = false;
     m_retryCount = 0;
     m_isFinishing = false;
     m_state = DownloadState::Connecting;
@@ -303,6 +362,13 @@ void DownloadTask::ProbeAndStart() {
         bool probeSuccess = false;
 
         while (maxRedirects-- > 0) {
+            if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+                m_isProbing = false;
+                m_state = DownloadState::Paused;
+                if (m_eventCb) m_eventCb(m_info.id);
+                return;
+            }
+
             UrlParts parts;
             if (!WinHttpUtils::ParseUrl(probeUrl, parts)) {
                 m_state = DownloadState::Failed;
@@ -325,6 +391,7 @@ void DownloadTask::ProbeAndStart() {
                 if (m_eventCb) m_eventCb(m_info.id);
                 return;
             }
+            m_hProbeSession = hSession;
 
             DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
             WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
@@ -337,6 +404,13 @@ void DownloadTask::ProbeAndStart() {
             HINTERNET hConnect = WinHttpConnect(hSession, parts.host.c_str(), parts.port, 0);
             if (!hConnect) {
                 WinHttpCloseHandle(hSession);
+                m_hProbeSession = nullptr;
+                if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+                    m_state = DownloadState::Paused;
+                    m_isProbing = false;
+                    if (m_eventCb) m_eventCb(m_info.id);
+                    return;
+                }
                 int maxRetries = Config::Instance().maxRetryAttempts;
                 if (m_retryCount < maxRetries) {
                     m_retryCount++;
@@ -359,6 +433,13 @@ void DownloadTask::ProbeAndStart() {
             if (!hRequest) {
                 WinHttpCloseHandle(hConnect);
                 WinHttpCloseHandle(hSession);
+                m_hProbeSession = nullptr;
+                if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+                    m_state = DownloadState::Paused;
+                    m_isProbing = false;
+                    if (m_eventCb) m_eventCb(m_info.id);
+                    return;
+                }
                 int maxRetries = Config::Instance().maxRetryAttempts;
                 if (m_retryCount < maxRetries) {
                     m_retryCount++;
@@ -374,6 +455,7 @@ void DownloadTask::ProbeAndStart() {
                 if (m_eventCb) m_eventCb(m_info.id);
                 return;
             }
+            m_hProbeRequest = hRequest;
 
             if (parts.isHttps) {
                 DWORD secFlags = SECURITY_FLAG_IGNORE_UNKNOWN_CA |
@@ -397,6 +479,14 @@ void DownloadTask::ProbeAndStart() {
                 WinHttpCloseHandle(hRequest);
                 WinHttpCloseHandle(hConnect);
                 WinHttpCloseHandle(hSession);
+                m_hProbeRequest = nullptr;
+                m_hProbeSession = nullptr;
+                if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+                    m_state = DownloadState::Paused;
+                    m_isProbing = false;
+                    if (m_eventCb) m_eventCb(m_info.id);
+                    return;
+                }
                 int maxRetries = Config::Instance().maxRetryAttempts;
                 if (m_retryCount < maxRetries) {
                     m_retryCount++;
@@ -503,7 +593,16 @@ void DownloadTask::ProbeAndStart() {
             WinHttpCloseHandle(hRequest);
             WinHttpCloseHandle(hConnect);
             WinHttpCloseHandle(hSession);
+            m_hProbeRequest = nullptr;
+            m_hProbeSession = nullptr;
             break;
+        }
+
+        if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+            m_state = DownloadState::Paused;
+            m_isProbing = false;
+            if (m_eventCb) m_eventCb(m_info.id);
+            return;
         }
 
         if (!probeSuccess && totalLength == 0 && !supportsRange) {
@@ -555,6 +654,13 @@ void DownloadTask::ProbeAndStart() {
                (supportsRange ? (L" (" + std::to_wstring(m_info.segments.size()) + L" parça)") : L" (Tek parça)"), 1);
     }
 
+    if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+        m_state = DownloadState::Paused;
+        m_isProbing = false;
+        if (m_eventCb) m_eventCb(m_info.id);
+        return;
+    }
+
     // Ensure save directory exists
     CreateDirectoryW(m_info.saveDirectory.c_str(), NULL);
 
@@ -586,10 +692,27 @@ void DownloadTask::ProbeAndStart() {
     }
 
     m_isProbing = false;
+
+    if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+        if (m_hFile != INVALID_HANDLE_VALUE) {
+            CloseHandle(m_hFile);
+            m_hFile = INVALID_HANDLE_VALUE;
+        }
+        m_state = DownloadState::Paused;
+        if (m_eventCb) m_eventCb(m_info.id);
+        return;
+    }
+
     LaunchWorkers();
 }
 
 void DownloadTask::LaunchWorkers() {
+    if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+        m_state = DownloadState::Paused;
+        if (m_eventCb) m_eventCb(m_info.id);
+        return;
+    }
+
     AddLog(L"Parça indirme iş parçacıkları başlatılıyor...", 0);
 
     std::vector<std::unique_ptr<SegmentWorker>> workers;
@@ -648,7 +771,7 @@ void DownloadTask::OnSegmentFinished(int segId, bool success, const std::wstring
 }
 
 void DownloadTask::CheckAllFinished() {
-    if (m_state.load() != DownloadState::Downloading) {
+    if (m_pauseRequested.load() || m_state.load() != DownloadState::Downloading) {
         return;
     }
 
@@ -684,6 +807,10 @@ void DownloadTask::CheckAllFinished() {
             }
         }
         if (allStopped && anyFailed) {
+            if (m_pauseRequested.load() || m_state.load() == DownloadState::Paused) {
+                return;
+            }
+
             if (m_hFile != INVALID_HANDLE_VALUE) {
                 CloseHandle(m_hFile);
                 m_hFile = INVALID_HANDLE_VALUE;
@@ -699,7 +826,7 @@ void DownloadTask::CheckAllFinished() {
 
                 std::thread([this]() {
                     std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-                    if (m_state.load() == DownloadState::Connecting) {
+                    if (m_state.load() == DownloadState::Connecting && !m_pauseRequested.load()) {
                         ProbeAndStart();
                     }
                 }).detach();
@@ -760,17 +887,33 @@ void DownloadTask::CheckAllFinished() {
 }
 
 void DownloadTask::Pause() {
-    if (m_state.load() != DownloadState::Downloading && m_state.load() != DownloadState::Connecting) {
+    DownloadState cur = m_state.load();
+    if (cur == DownloadState::Paused || cur == DownloadState::Completed || cur == DownloadState::Deleted) {
         return;
     }
+
+    m_pauseRequested = true;
+
+    if (cur == DownloadState::Queued) {
+        m_state = DownloadState::Paused;
+        AddLog(L"Kuyruktaki indirme duraklatıldı.", 2);
+        if (m_eventCb) m_eventCb(m_info.id);
+        return;
+    }
+
+    m_state = DownloadState::Paused;
 
     if (m_isMediaTask) {
         AddLog(L"Video indirme duraklatılıyor...", 2);
         m_isMediaCancelled = true;
-        if (m_hMediaProcess != NULL) {
-            TerminateProcess(m_hMediaProcess, 0);
+        HANDLE hProc = NULL;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            hProc = m_hMediaProcess;
         }
-        m_state = DownloadState::Paused;
+        if (hProc != NULL) {
+            TerminateProcess(hProc, 0);
+        }
         {
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_info.currentSpeedBps = 0.0;
@@ -780,8 +923,13 @@ void DownloadTask::Pause() {
         return;
     }
 
+    // Cancel probing if active
+    HINTERNET prReq = m_hProbeRequest.exchange(nullptr);
+    if (prReq) WinHttpCloseHandle(prReq);
+    HINTERNET prSess = m_hProbeSession.exchange(nullptr);
+    if (prSess) WinHttpCloseHandle(prSess);
+
     AddLog(L"İndirme duraklatılıyor...", 2);
-    m_state = DownloadState::Paused;
 
     std::vector<std::unique_ptr<SegmentWorker>> workersToStop;
     {
@@ -943,6 +1091,7 @@ void DownloadTask::RunMediaDownload() {
     std::string lineAcc;
 
     while (ReadFile(hStdOutRead, buffer, sizeof(buffer), &bytesRead, NULL) && bytesRead > 0) {
+        if (m_isMediaCancelled.load()) break;
         for (DWORD i = 0; i < bytesRead; ++i) {
             char c = buffer[i];
             if (c == '\r') continue;

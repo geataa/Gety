@@ -4047,4 +4047,642 @@ bool Dialogs::ShowUpdateUrlDialog(HWND hParent, const std::wstring& currentUrl, 
     return false;
 }
 
+// -------------------------------------------------------------
+// 6. Rename Dialog (Yeniden Adlandır)
+// -------------------------------------------------------------
+struct RenameDialogData {
+    std::wstring currentFilename;
+    std::wstring newFilename;
+    bool accepted = false;
+
+    HWND hwndLblPrompt = NULL;
+    HWND hwndFilename = NULL;
+    HWND hwndBtnCancel = NULL;
+    HWND hwndBtnOk = NULL;
+
+    HFONT hFont = NULL;
+    HFONT hFontBold = NULL;
+
+    CustomDialogHeader header;
+};
+
+static void LayoutRenameControls(HWND hwnd, RenameDialogData* pData) {
+    if (!pData) return;
+    RECT clR;
+    GetClientRect(hwnd, &clR);
+    int padX = DlgScale(hwnd, 30);
+    int fieldW = clR.right - padX * 2;
+    int inputH = DlgScale(hwnd, 28);
+    int labelH = DlgScale(hwnd, 18);
+
+    int y0 = DlgScale(hwnd, 64);
+    MoveWindow(pData->hwndLblPrompt, padX, y0, fieldW, labelH, TRUE);
+    MoveWindow(pData->hwndFilename, padX, y0 + labelH + DlgScale(hwnd, 6), fieldW, inputH, TRUE);
+
+    int btnH = DlgScale(hwnd, 34);
+    int yBtns = clR.bottom - DlgScale(hwnd, 46);
+    int cancelW = DlgScale(hwnd, 105);
+    int okW = DlgScale(hwnd, 130);
+    int okX = clR.right - padX - okW;
+    int cancelX = okX - cancelW - DlgScale(hwnd, 12);
+
+    MoveWindow(pData->hwndBtnCancel, cancelX, yBtns, cancelW, btnH, TRUE);
+    MoveWindow(pData->hwndBtnOk, okX, yBtns, okW, btnH, TRUE);
+}
+
+static LRESULT CALLBACK RenameDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    RenameDialogData* pData = (RenameDialogData*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+    switch (msg) {
+        case WM_CREATE: {
+            CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+            pData = (RenameDialogData*)cs->lpCreateParams;
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)pData);
+            pData->header.title = LStr(StrId::DlgRenameTitle);
+            ApplyDialogDarkMode(hwnd);
+
+            pData->hFont = Theme::CreateAppFont(hwnd, 9, FW_NORMAL);
+            pData->hFontBold = Theme::CreateAppFont(hwnd, 9, FW_SEMIBOLD);
+
+            pData->hwndLblPrompt = CreateWindowW(L"STATIC", LStr(StrId::DlgRenamePrompt), WS_CHILD | WS_VISIBLE,
+                                                 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            SendMessageW(pData->hwndLblPrompt, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
+
+            pData->hwndFilename = CreateWindowExW(0, L"EDIT", pData->currentFilename.c_str(),
+                                                  WS_CHILD | WS_VISIBLE | WS_TABSTOP | WS_BORDER | ES_AUTOHSCROLL,
+                                                  0, 0, 0, 0, hwnd, (HMENU)601, GetModuleHandle(NULL), NULL);
+            SetWindowTheme(pData->hwndFilename, L"DarkMode_Explorer", NULL);
+            SendMessageW(pData->hwndFilename, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+
+            pData->hwndBtnCancel = CreateWindowW(L"BUTTON", LStr(StrId::DlgCancel), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                                 0, 0, 0, 0, hwnd, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
+
+            pData->hwndBtnOk = CreateWindowW(L"BUTTON", LStr(StrId::DlgSave), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                             0, 0, 0, 0, hwnd, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
+
+            LayoutRenameControls(hwnd, pData);
+
+            SetFocus(pData->hwndFilename);
+            size_t lastDot = pData->currentFilename.rfind(L'.');
+            if (lastDot != std::wstring::npos && lastDot > 0) {
+                SendMessageW(pData->hwndFilename, EM_SETSEL, 0, (LPARAM)lastDot);
+            } else {
+                SendMessageW(pData->hwndFilename, EM_SETSEL, 0, -1);
+            }
+
+            if (!s_dialogSnapshotPath.empty()) {
+                SetTimer(hwnd, 9999, 150, NULL);
+            }
+            return 0;
+        }
+
+        case WM_DPICHANGED: {
+            RECT* prc = (RECT*)lParam;
+            SetWindowPos(hwnd, NULL, prc->left, prc->top, prc->right - prc->left, prc->bottom - prc->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            if (pData) {
+                if (pData->hFont) DeleteObject(pData->hFont);
+                if (pData->hFontBold) DeleteObject(pData->hFontBold);
+                pData->hFont = Theme::CreateAppFont(hwnd, 9, FW_NORMAL);
+                pData->hFontBold = Theme::CreateAppFont(hwnd, 9, FW_SEMIBOLD);
+
+                SendMessageW(pData->hwndLblPrompt, WM_SETFONT, (WPARAM)pData->hFontBold, TRUE);
+                SendMessageW(pData->hwndFilename, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+
+                LayoutRenameControls(hwnd, pData);
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            return 0;
+        }
+
+        case WM_DESTROY: {
+            if (pData) {
+                if (pData->hFont) { DeleteObject(pData->hFont); pData->hFont = NULL; }
+                if (pData->hFontBold) { DeleteObject(pData->hFontBold); pData->hFontBold = NULL; }
+            }
+            return 0;
+        }
+
+        case WM_TIMER: {
+            if (wParam == 9999) {
+                KillTimer(hwnd, 9999);
+                CaptureHwndToPng(hwnd, s_dialogSnapshotPath);
+                s_dialogSnapshotPath.clear();
+                PostMessage(hwnd, WM_CLOSE, 0, 0);
+                return 0;
+            }
+            break;
+        }
+
+        case WM_NCHITTEST: {
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(hwnd, &pt);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            if (pt.y <= DlgScale(hwnd, 42)) {
+                if (pData && pData->header.HitTestClose(hwnd, pt.x, pt.y, rc.right)) {
+                    return HTCLIENT;
+                }
+                return HTCAPTION;
+            }
+            return HTCLIENT;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (pData) {
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                bool wasHov = pData->header.closeHovered;
+                pData->header.closeHovered = pData->header.HitTestClose(hwnd, x, y, rc.right);
+                if (wasHov != pData->header.closeHovered) {
+                    RECT r = { rc.right - DlgScale(hwnd, 42), 0, rc.right, DlgScale(hwnd, 42) };
+                    InvalidateRect(hwnd, &r, FALSE);
+                }
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN: {
+            if (pData) {
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                if (pData->header.HitTestClose(hwnd, x, y, rc.right)) {
+                    pData->accepted = false;
+                    DestroyWindow(hwnd);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            if (pData) {
+                pData->header.Draw(hwnd, hdc, rc.right, rc.bottom);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        case WM_DRAWITEM: {
+            LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)lParam;
+            if (dis->CtlID == IDOK) {
+                Theme::DrawModernButton(dis, true, L"✏  " + std::wstring(LStr(StrId::DlgSave)));
+                return TRUE;
+            } else if (dis->CtlID == IDCANCEL) {
+                Theme::DrawModernButton(dis, false, LStr(StrId::DlgCancel));
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_CTLCOLORDLG: {
+            static HBRUSH hbrDlg = CreateSolidBrush(Theme::BgMain);
+            return (LRESULT)hbrDlg;
+        }
+
+        case WM_CTLCOLORSTATIC: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, Theme::TextPrimary);
+            SetBkColor(hdc, Theme::BgCard);
+            static HBRUSH hbrCard = CreateSolidBrush(Theme::BgCard);
+            return (LRESULT)hbrCard;
+        }
+
+        case WM_CTLCOLOREDIT: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, Theme::TextPrimary);
+            SetBkColor(hdc, Theme::BgInput);
+            static HBRUSH hbrEdit = CreateSolidBrush(Theme::BgInput);
+            return (LRESULT)hbrEdit;
+        }
+
+        case WM_COMMAND: {
+            int wmId = LOWORD(wParam);
+            if (wmId == IDOK) {
+                wchar_t buf[1024] = { 0 };
+                GetWindowTextW(pData->hwndFilename, buf, _countof(buf));
+                std::wstring val = buf;
+                size_t first = val.find_first_not_of(L" \t\r\n");
+                size_t last = val.find_last_not_of(L" \t\r\n");
+                if (first == std::wstring::npos || last == std::wstring::npos) {
+                    MessageBoxW(hwnd, L"Lütfen geçerli bir dosya adı girin.", LStr(StrId::DlgRenameTitle), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                std::wstring trimmed = val.substr(first, (last - first + 1));
+                if (trimmed.find_first_of(L"\\/:*?\"<>|") != std::wstring::npos) {
+                    MessageBoxW(hwnd, L"Dosya adı geçersiz karakterler içeremez (\\ / : * ? \" < > |).", LStr(StrId::DlgRenameTitle), MB_OK | MB_ICONWARNING);
+                    return 0;
+                }
+                pData->newFilename = trimmed;
+                pData->accepted = true;
+                DestroyWindow(hwnd);
+            } else if (wmId == IDCANCEL) {
+                pData->accepted = false;
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
+
+        case WM_CLOSE:
+            if (pData) pData->accepted = false;
+            DestroyWindow(hwnd);
+            return 0;
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+bool Dialogs::ShowRenameDialog(HWND hParent, const std::wstring& currentFilename, std::wstring& outNewFilename) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc = { 0 };
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = RenameDlgProc;
+        wc.hInstance = GetModuleHandle(NULL);
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hbrBackground = CreateSolidBrush(Theme::BgMain);
+        wc.lpszClassName = L"GetyRenameDlg";
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+
+    RenameDialogData data;
+    data.currentFilename = currentFilename;
+    data.newFilename = currentFilename;
+
+    RECT prc = { 0 };
+    if (hParent && IsWindow(hParent)) {
+        GetWindowRect(hParent, &prc);
+    }
+    if (prc.right <= prc.left || prc.bottom <= prc.top) {
+        prc.left = 0;
+        prc.top = 0;
+        prc.right = GetSystemMetrics(SM_CXSCREEN);
+        prc.bottom = GetSystemMetrics(SM_CYSCREEN);
+    }
+    int dlgW = DlgScale(hParent, 540);
+    int dlgH = DlgScale(hParent, 220);
+    int x = prc.left + ((prc.right - prc.left) - dlgW) / 2;
+    int y = prc.top + ((prc.bottom - prc.top) - dlgH) / 2;
+
+    HWND hDlg = CreateWindowExW(
+        WS_EX_APPWINDOW,
+        L"GetyRenameDlg",
+        LStr(StrId::DlgRenameTitle),
+        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
+        x, y, dlgW, dlgH,
+        hParent,
+        NULL,
+        GetModuleHandle(NULL),
+        &data
+    );
+
+    if (hParent && IsWindow(hParent)) {
+        EnableWindow(hParent, FALSE);
+    }
+
+    MSG msg;
+    while (IsWindow(hDlg) && GetMessageW(&msg, NULL, 0, 0)) {
+        if (!IsDialogMessageW(hDlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    if (hParent && IsWindow(hParent)) {
+        EnableWindow(hParent, TRUE);
+        SetForegroundWindow(hParent);
+    }
+
+    if (data.accepted) {
+        outNewFilename = data.newFilename;
+        return true;
+    }
+    return false;
+}
+
+// -------------------------------------------------------------
+// 7. Delete Confirmation Dialog (İndirmeyi Sil / Dosya Kalsın Seçeneği)
+// -------------------------------------------------------------
+struct DeleteConfirmDialogData {
+    int taskCount = 1;
+    bool defaultDeleteFile = false;
+    bool deleteFile = false;
+    bool accepted = false;
+
+    HWND hwndLblPrompt = NULL;
+    HWND hwndChkDeleteFile = NULL;
+    HWND hwndLblDeleteFile = NULL;
+    HWND hwndBtnCancel = NULL;
+    HWND hwndBtnDelete = NULL;
+
+    HFONT hFont = NULL;
+    HFONT hFontBold = NULL;
+
+    CustomDialogHeader header;
+};
+
+static void LayoutDeleteConfirmControls(HWND hwnd, DeleteConfirmDialogData* pData) {
+    if (!pData) return;
+    RECT clR;
+    GetClientRect(hwnd, &clR);
+    int padX = DlgScale(hwnd, 30);
+    int fieldW = clR.right - padX * 2;
+
+    int y0 = DlgScale(hwnd, 62);
+    int promptH = DlgScale(hwnd, 38);
+    MoveWindow(pData->hwndLblPrompt, padX, y0, fieldW, promptH, TRUE);
+
+    int chkY = y0 + promptH + DlgScale(hwnd, 8);
+    int chkW = DlgScale(hwnd, 20);
+    int chkH = DlgScale(hwnd, 20);
+    MoveWindow(pData->hwndChkDeleteFile, padX, chkY, chkW, chkH, TRUE);
+    MoveWindow(pData->hwndLblDeleteFile, padX + chkW + DlgScale(hwnd, 8), chkY + 1, fieldW - chkW - DlgScale(hwnd, 8), chkH, TRUE);
+
+    int btnH = DlgScale(hwnd, 34);
+    int yBtns = clR.bottom - DlgScale(hwnd, 46);
+    int cancelW = DlgScale(hwnd, 105);
+    int delW = DlgScale(hwnd, 130);
+    int delX = clR.right - padX - delW;
+    int cancelX = delX - cancelW - DlgScale(hwnd, 12);
+
+    MoveWindow(pData->hwndBtnCancel, cancelX, yBtns, cancelW, btnH, TRUE);
+    MoveWindow(pData->hwndBtnDelete, delX, yBtns, delW, btnH, TRUE);
+}
+
+static LRESULT CALLBACK DeleteConfirmDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    DeleteConfirmDialogData* pData = (DeleteConfirmDialogData*)GetWindowLongPtr(hwnd, GWLP_USERDATA);
+
+    switch (msg) {
+        case WM_CREATE: {
+            CREATESTRUCT* cs = (CREATESTRUCT*)lParam;
+            pData = (DeleteConfirmDialogData*)cs->lpCreateParams;
+            SetWindowLongPtr(hwnd, GWLP_USERDATA, (LONG_PTR)pData);
+            pData->header.title = LStr(StrId::DlgDeleteTitle);
+            ApplyDialogDarkMode(hwnd);
+
+            pData->hFont = Theme::CreateAppFont(hwnd, 9, FW_NORMAL);
+            pData->hFontBold = Theme::CreateAppFont(hwnd, 9, FW_SEMIBOLD);
+
+            std::wstring promptText;
+            if (pData->taskCount <= 1) {
+                promptText = LStr(StrId::DlgDeleteConfirmPrompt);
+            } else {
+                wchar_t pBuf[256];
+                swprintf_s(pBuf, LStr(StrId::DlgDeleteMultiplePrompt), pData->taskCount);
+                promptText = pBuf;
+            }
+
+            pData->hwndLblPrompt = CreateWindowW(L"STATIC", promptText.c_str(), WS_CHILD | WS_VISIBLE,
+                                                 0, 0, 0, 0, hwnd, NULL, GetModuleHandle(NULL), NULL);
+            SendMessageW(pData->hwndLblPrompt, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+
+            pData->hwndChkDeleteFile = CreateWindowW(L"BUTTON", L"",
+                                                     WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+                                                     0, 0, 0, 0, hwnd, (HMENU)701, GetModuleHandle(NULL), NULL);
+            SendMessageW(pData->hwndChkDeleteFile, BM_SETCHECK, pData->defaultDeleteFile ? BST_CHECKED : BST_UNCHECKED, 0);
+
+            pData->hwndLblDeleteFile = CreateWindowW(L"STATIC", LStr(StrId::DlgDeleteKeepFileCheck),
+                                                     WS_CHILD | WS_VISIBLE | SS_NOTIFY,
+                                                     0, 0, 0, 0, hwnd, (HMENU)702, GetModuleHandle(NULL), NULL);
+            SendMessageW(pData->hwndLblDeleteFile, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+
+            pData->hwndBtnCancel = CreateWindowW(L"BUTTON", LStr(StrId::DlgCancel), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                                 0, 0, 0, 0, hwnd, (HMENU)IDCANCEL, GetModuleHandle(NULL), NULL);
+
+            pData->hwndBtnDelete = CreateWindowW(L"BUTTON", LStr(StrId::MenuTaskDelete), WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
+                                                 0, 0, 0, 0, hwnd, (HMENU)IDOK, GetModuleHandle(NULL), NULL);
+
+            LayoutDeleteConfirmControls(hwnd, pData);
+
+            SetFocus(pData->hwndBtnCancel);
+
+            if (!s_dialogSnapshotPath.empty()) {
+                SetTimer(hwnd, 9999, 150, NULL);
+            }
+            return 0;
+        }
+
+        case WM_DPICHANGED: {
+            RECT* prc = (RECT*)lParam;
+            SetWindowPos(hwnd, NULL, prc->left, prc->top, prc->right - prc->left, prc->bottom - prc->top, SWP_NOZORDER | SWP_NOACTIVATE);
+            if (pData) {
+                if (pData->hFont) DeleteObject(pData->hFont);
+                if (pData->hFontBold) DeleteObject(pData->hFontBold);
+                pData->hFont = Theme::CreateAppFont(hwnd, 9, FW_NORMAL);
+                pData->hFontBold = Theme::CreateAppFont(hwnd, 9, FW_SEMIBOLD);
+
+                SendMessageW(pData->hwndLblPrompt, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+                SendMessageW(pData->hwndLblDeleteFile, WM_SETFONT, (WPARAM)pData->hFont, TRUE);
+
+                LayoutDeleteConfirmControls(hwnd, pData);
+                InvalidateRect(hwnd, NULL, TRUE);
+            }
+            return 0;
+        }
+
+        case WM_DESTROY: {
+            if (pData) {
+                if (pData->hFont) { DeleteObject(pData->hFont); pData->hFont = NULL; }
+                if (pData->hFontBold) { DeleteObject(pData->hFontBold); pData->hFontBold = NULL; }
+            }
+            return 0;
+        }
+
+        case WM_TIMER: {
+            if (wParam == 9999) {
+                KillTimer(hwnd, 9999);
+                CaptureHwndToPng(hwnd, s_dialogSnapshotPath);
+                s_dialogSnapshotPath.clear();
+                PostMessage(hwnd, WM_CLOSE, 0, 0);
+                return 0;
+            }
+            break;
+        }
+
+        case WM_NCHITTEST: {
+            POINT pt = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+            ScreenToClient(hwnd, &pt);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            if (pt.y <= DlgScale(hwnd, 42)) {
+                if (pData && pData->header.HitTestClose(hwnd, pt.x, pt.y, rc.right)) {
+                    return HTCLIENT;
+                }
+                return HTCAPTION;
+            }
+            return HTCLIENT;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (pData) {
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                bool wasHov = pData->header.closeHovered;
+                pData->header.closeHovered = pData->header.HitTestClose(hwnd, x, y, rc.right);
+                if (wasHov != pData->header.closeHovered) {
+                    RECT r = { rc.right - DlgScale(hwnd, 42), 0, rc.right, DlgScale(hwnd, 42) };
+                    InvalidateRect(hwnd, &r, FALSE);
+                }
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN: {
+            if (pData) {
+                int x = GET_X_LPARAM(lParam);
+                int y = GET_Y_LPARAM(lParam);
+                RECT rc;
+                GetClientRect(hwnd, &rc);
+                if (pData->header.HitTestClose(hwnd, x, y, rc.right)) {
+                    pData->accepted = false;
+                    DestroyWindow(hwnd);
+                    return 0;
+                }
+            }
+            return 0;
+        }
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hwnd, &ps);
+            RECT rc;
+            GetClientRect(hwnd, &rc);
+            if (pData) {
+                pData->header.Draw(hwnd, hdc, rc.right, rc.bottom);
+            }
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+
+        case WM_DRAWITEM: {
+            LPDRAWITEMSTRUCT dis = (LPDRAWITEMSTRUCT)lParam;
+            if (dis->CtlID == IDOK) {
+                Theme::DrawModernDangerButton(dis, L"🗑  " + std::wstring(LStr(StrId::MenuTaskDelete)));
+                return TRUE;
+            } else if (dis->CtlID == IDCANCEL) {
+                Theme::DrawModernButton(dis, false, LStr(StrId::DlgCancel));
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_CTLCOLORDLG: {
+            static HBRUSH hbrDlg = CreateSolidBrush(Theme::BgMain);
+            return (LRESULT)hbrDlg;
+        }
+
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORBTN: {
+            HDC hdc = (HDC)wParam;
+            SetTextColor(hdc, Theme::TextPrimary);
+            SetBkColor(hdc, Theme::BgCard);
+            static HBRUSH hbrCard = CreateSolidBrush(Theme::BgCard);
+            return (LRESULT)hbrCard;
+        }
+
+        case WM_COMMAND: {
+            int wmId = LOWORD(wParam);
+            if (wmId == 702) {
+                LRESULT chk = SendMessageW(pData->hwndChkDeleteFile, BM_GETCHECK, 0, 0);
+                SendMessageW(pData->hwndChkDeleteFile, BM_SETCHECK, chk == BST_CHECKED ? BST_UNCHECKED : BST_CHECKED, 0);
+            } else if (wmId == IDOK) {
+                pData->deleteFile = (SendMessageW(pData->hwndChkDeleteFile, BM_GETCHECK, 0, 0) == BST_CHECKED);
+                pData->accepted = true;
+                DestroyWindow(hwnd);
+            } else if (wmId == IDCANCEL) {
+                pData->accepted = false;
+                DestroyWindow(hwnd);
+            }
+            return 0;
+        }
+
+        case WM_CLOSE:
+            if (pData) pData->accepted = false;
+            DestroyWindow(hwnd);
+            return 0;
+    }
+
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+bool Dialogs::ShowDeleteConfirmDialog(HWND hParent, int taskCount, bool& outDeleteFile, bool defaultDeleteFile) {
+    static bool registered = false;
+    if (!registered) {
+        WNDCLASSEXW wc = { 0 };
+        wc.cbSize = sizeof(wc);
+        wc.lpfnWndProc = DeleteConfirmDlgProc;
+        wc.hInstance = GetModuleHandle(NULL);
+        wc.hCursor = LoadCursor(NULL, IDC_ARROW);
+        wc.hbrBackground = CreateSolidBrush(Theme::BgMain);
+        wc.lpszClassName = L"GetyDeleteConfirmDlg";
+        RegisterClassExW(&wc);
+        registered = true;
+    }
+
+    DeleteConfirmDialogData data;
+    data.taskCount = taskCount;
+    data.defaultDeleteFile = defaultDeleteFile;
+    data.deleteFile = defaultDeleteFile;
+
+    RECT prc = { 0 };
+    if (hParent && IsWindow(hParent)) {
+        GetWindowRect(hParent, &prc);
+    }
+    if (prc.right <= prc.left || prc.bottom <= prc.top) {
+        prc.left = 0;
+        prc.top = 0;
+        prc.right = GetSystemMetrics(SM_CXSCREEN);
+        prc.bottom = GetSystemMetrics(SM_CYSCREEN);
+    }
+    int dlgW = DlgScale(hParent, 540);
+    int dlgH = DlgScale(hParent, 230);
+    int x = prc.left + ((prc.right - prc.left) - dlgW) / 2;
+    int y = prc.top + ((prc.bottom - prc.top) - dlgH) / 2;
+
+    HWND hDlg = CreateWindowExW(
+        WS_EX_APPWINDOW,
+        L"GetyDeleteConfirmDlg",
+        LStr(StrId::DlgDeleteTitle),
+        WS_POPUP | WS_VISIBLE | WS_CLIPCHILDREN,
+        x, y, dlgW, dlgH,
+        hParent,
+        NULL,
+        GetModuleHandle(NULL),
+        &data
+    );
+
+    if (hParent && IsWindow(hParent)) {
+        EnableWindow(hParent, FALSE);
+    }
+
+    MSG msg;
+    while (IsWindow(hDlg) && GetMessageW(&msg, NULL, 0, 0)) {
+        if (!IsDialogMessageW(hDlg, &msg)) {
+            TranslateMessage(&msg);
+            DispatchMessageW(&msg);
+        }
+    }
+
+    if (hParent && IsWindow(hParent)) {
+        EnableWindow(hParent, TRUE);
+        SetForegroundWindow(hParent);
+    }
+
+    if (data.accepted) {
+        outDeleteFile = data.deleteFile;
+        return true;
+    }
+    return false;
+}
+
 } // namespace Gety

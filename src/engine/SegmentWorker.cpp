@@ -40,6 +40,12 @@ SegmentWorker::~SegmentWorker() {
 
 void SegmentWorker::Start() {
     if (m_isRunning.load()) return;
+    uint64_t totalSegmentBytes = (m_endByte >= m_startByte) ? (m_endByte - m_startByte + 1) : 0;
+    if (totalSegmentBytes > 0 && m_downloadedBytes.load() >= totalSegmentBytes) {
+        m_status = 3; // Done
+        if (m_finishCb) m_finishCb(m_id, true, L"");
+        return;
+    }
     m_stopRequested = false;
     m_isRunning = true;
     m_thread = std::thread(&SegmentWorker::WorkerProc, this);
@@ -55,7 +61,11 @@ void SegmentWorker::Stop() {
     if (sess) WinHttpCloseHandle(sess);
 
     if (m_thread.joinable()) {
-        m_thread.detach();
+        if (m_thread.get_id() != std::this_thread::get_id()) {
+            m_thread.join();
+        } else {
+            m_thread.detach();
+        }
     }
     m_isRunning = false;
 }
@@ -182,6 +192,11 @@ void SegmentWorker::WorkerProc() {
 
         if (!WinHttpSendRequest(hRequest, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0)) {
             closeAllHandles();
+            if (m_stopRequested.load()) {
+                m_status = 0;
+                m_isRunning = false;
+                return;
+            }
             m_status = 4;
             m_isRunning = false;
             if (m_finishCb) m_finishCb(m_id, false, L"İstek gönderilemedi");
@@ -190,6 +205,11 @@ void SegmentWorker::WorkerProc() {
 
         if (!WinHttpReceiveResponse(hRequest, NULL)) {
             closeAllHandles();
+            if (m_stopRequested.load()) {
+                m_status = 0;
+                m_isRunning = false;
+                return;
+            }
             m_status = 4;
             m_isRunning = false;
             if (m_finishCb) m_finishCb(m_id, false, L"Yanıt alınamadı");
@@ -217,8 +237,20 @@ void SegmentWorker::WorkerProc() {
         break;
     }
 
+    if (m_stopRequested.load()) {
+        closeAllHandles();
+        m_status = 0;
+        m_isRunning = false;
+        return;
+    }
+
     if (!connected || (statusCode != 200 && statusCode != 206)) {
         closeAllHandles();
+        if (m_stopRequested.load()) {
+            m_status = 0;
+            m_isRunning = false;
+            return;
+        }
         m_status = 4;
         m_isRunning = false;
         std::wstring err = L"HTTP Durum Kodu: " + std::to_wstring(statusCode);
@@ -243,10 +275,13 @@ void SegmentWorker::WorkerProc() {
 
     while (!m_stopRequested.load()) {
         HINTERNET hReq = m_hRequest.load();
-        if (!hReq) break;
+        if (!hReq || m_stopRequested.load()) break;
 
         DWORD bytesAvailable = 0;
         if (!WinHttpQueryDataAvailable(hReq, &bytesAvailable)) {
+            if (m_stopRequested.load()) break;
+            errorOccurred = true;
+            errorStr = L"Veri sorgulama hatası";
             break;
         }
 
@@ -270,15 +305,17 @@ void SegmentWorker::WorkerProc() {
 
         // Apply Speed Limiter
         SpeedLimiter::Instance().Throttle(bytesToRead);
+        if (m_stopRequested.load()) break;
 
         DWORD bytesRead = 0;
         if (!WinHttpReadData(hReq, buffer.data(), bytesToRead, &bytesRead)) {
+            if (m_stopRequested.load()) break;
             errorOccurred = true;
             errorStr = L"Veri okuma hatası";
             break;
         }
 
-        if (bytesRead == 0) {
+        if (bytesRead == 0 || m_stopRequested.load()) {
             break;
         }
 
@@ -290,6 +327,7 @@ void SegmentWorker::WorkerProc() {
 
         DWORD bytesWritten = 0;
         if (!WriteFile(m_hFile, buffer.data(), bytesRead, &bytesWritten, &ov) || bytesWritten != bytesRead) {
+            if (m_stopRequested.load()) break;
             errorOccurred = true;
             errorStr = L"Diske yazma hatası";
             break;
@@ -307,7 +345,7 @@ void SegmentWorker::WorkerProc() {
             bytesSinceSpeedCheck = 0;
         }
 
-        if (m_progCb) {
+        if (m_progCb && !m_stopRequested.load()) {
             m_progCb(m_id, m_downloadedBytes.load());
         }
 

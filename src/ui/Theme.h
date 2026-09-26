@@ -133,6 +133,59 @@ inline void DrawModernButton(LPDRAWITEMSTRUCT dis, bool isPrimary, const std::ws
     if (tempFont) DeleteObject(tempFont);
 }
 
+inline void DrawModernDangerButton(LPDRAWITEMSTRUCT dis, const std::wstring& text, HFONT hFont = NULL) {
+    HDC hdc = dis->hDC;
+    RECT rc = dis->rcItem;
+    bool isPressed = (dis->itemState & ODS_SELECTED);
+    bool isDisabled = (dis->itemState & ODS_DISABLED);
+
+    COLORREF bgCol;
+    COLORREF borderCol;
+    COLORREF textCol;
+
+    if (isDisabled) {
+        bgCol = RGB(35, 20, 20);
+        borderCol = RGB(55, 30, 30);
+        textCol = RGB(120, 80, 80);
+    } else if (isPressed) {
+        bgCol = RGB(185, 28, 28);
+        borderCol = RGB(239, 68, 68);
+        textCol = RGB(255, 255, 255);
+    } else {
+        bgCol = RGB(220, 38, 38);
+        borderCol = RGB(248, 113, 113);
+        textCol = RGB(255, 255, 255);
+    }
+
+    HBRUSH hBgBrush = CreateSolidBrush(bgCol);
+    HPEN hBorderPen = CreatePen(PS_SOLID, 1, borderCol);
+    HGDIOBJ oldBrush = SelectObject(hdc, hBgBrush);
+    HGDIOBJ oldPen = SelectObject(hdc, hBorderPen);
+
+    RoundRect(hdc, rc.left, rc.top, rc.right, rc.bottom, 8, 8);
+
+    SelectObject(hdc, oldBrush);
+    SelectObject(hdc, oldPen);
+    DeleteObject(hBgBrush);
+    DeleteObject(hBorderPen);
+
+    HGDIOBJ oldFont = NULL;
+    HFONT tempFont = NULL;
+    if (hFont) {
+        oldFont = SelectObject(hdc, hFont);
+    } else {
+        tempFont = CreateAppFont(dis->hwndItem, 9, FW_SEMIBOLD);
+        oldFont = SelectObject(hdc, tempFont);
+    }
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, textCol);
+    DrawTextW(hdc, text.c_str(), -1, &rc, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+
+    if (oldFont) SelectObject(hdc, oldFont);
+    if (tempFont) DeleteObject(tempFont);
+}
+
 inline void DrawSegmentedTab(LPDRAWITEMSTRUCT dis, bool isSelected, const std::wstring& text, HFONT hFont = NULL) {
     HDC hdc = dis->hDC;
     RECT rc = dis->rcItem;

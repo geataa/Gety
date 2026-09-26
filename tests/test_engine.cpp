@@ -437,6 +437,54 @@ int main(int argc, char* argv[]) {
         std::wcout << L"    Hugging Face Live Hub API Fetch & Resolution PASSED!" << std::endl;
     }
 
-    std::wcout << L"\nAll 15 Tests Completed Successfully! Gety Engine is 100% Rock Solid." << std::endl;
+    // Test 16: Pause, Rename, and Delete Keep-File / Delete-From-Disk
+    std::wcout << L"[16] Testing Pause, Task/File Rename, and Delete File Preservation..." << std::endl;
+    {
+        std::wstring tempSaveDir = std::filesystem::current_path().wstring() + L"\\test_rename_dir";
+        std::filesystem::create_directories(tempSaveDir);
+
+        auto task = std::make_shared<DownloadTask>(L"https://example.com/original_archive.zip", tempSaveDir, L"General", 4, L"original_archive.zip");
+        assert(task->GetSnapshot().filename == L"original_archive.zip");
+        assert(task->GetSnapshot().state == DownloadState::Queued);
+
+        // 1. Test Pause in Queued state
+        task->Pause();
+        assert(task->GetSnapshot().state == DownloadState::Paused);
+
+        // 2. Test Rename without file on disk
+        bool renamed = task->Rename(L"renamed_archive.zip");
+        assert(renamed);
+        assert(task->GetSnapshot().filename == L"renamed_archive.zip");
+        assert(task->GetSnapshot().fullPath == tempSaveDir + L"\\renamed_archive.zip");
+
+        // 3. Test Rename with completed file on disk
+        std::wstring currentFilePath = task->GetSnapshot().fullPath;
+        {
+            std::ofstream f(currentFilePath, std::ios::binary);
+            f << "Gety Test File Content";
+        }
+        assert(std::filesystem::exists(currentFilePath));
+
+        bool renamed2 = task->Rename(L"final_named_file.zip");
+        assert(renamed2);
+        assert(!std::filesystem::exists(currentFilePath));
+        std::wstring newFilePath = task->GetSnapshot().fullPath;
+        assert(std::filesystem::exists(newFilePath));
+        assert(task->GetSnapshot().filename == L"final_named_file.zip");
+
+        // 4. Test Delete Task with deleteFile = false (KEEP FILE ON DISK)
+        task->DeleteTask(false);
+        assert(task->GetSnapshot().state == DownloadState::Deleted);
+        assert(std::filesystem::exists(newFilePath)); // File is PRESERVED on disk!
+
+        // 5. Test Delete Task with deleteFile = true (PERMANENTLY DELETE FROM DISK)
+        task->DeleteTask(true);
+        assert(!std::filesystem::exists(newFilePath)); // File is REMOVED from disk!
+
+        std::filesystem::remove_all(tempSaveDir);
+        std::wcout << L"    Pause, Rename, and Delete File Preservation PASSED!" << std::endl;
+    }
+
+    std::wcout << L"\nAll 16 Tests Completed Successfully! Gety Engine is 100% Rock Solid." << std::endl;
     return 0;
 }

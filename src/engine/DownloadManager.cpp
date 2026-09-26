@@ -153,6 +153,8 @@ void DownloadManager::StartTask(const std::wstring& id) {
     }
     if (target) {
         target->Start();
+        SaveTasks();
+        if (m_onUpdate) m_onUpdate();
     }
 }
 
@@ -169,6 +171,8 @@ void DownloadManager::PauseTask(const std::wstring& id) {
     }
     if (target) {
         target->Pause();
+        SaveTasks();
+        if (m_onUpdate) m_onUpdate();
     }
 }
 
@@ -233,6 +237,26 @@ bool DownloadManager::UpdateTaskUrl(const std::wstring& id, const std::wstring& 
     return false;
 }
 
+bool DownloadManager::RenameTask(const std::wstring& id, const std::wstring& newFilename) {
+    std::shared_ptr<DownloadTask> target;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (auto& t : m_tasks) {
+            if (t && t->GetId() == id) {
+                target = t;
+                break;
+            }
+        }
+    }
+    if (target) {
+        bool res = target->Rename(newFilename);
+        SaveTasks();
+        if (m_onUpdate) m_onUpdate();
+        return res;
+    }
+    return false;
+}
+
 void DownloadManager::MoveTaskUp(const std::wstring& id) {
     std::lock_guard<std::mutex> lock(m_mutex);
     for (size_t i = 1; i < m_tasks.size(); ++i) {
@@ -266,6 +290,8 @@ void DownloadManager::PauseAll() {
     for (auto& t : copyList) {
         t->Pause();
     }
+    SaveTasks();
+    if (m_onUpdate) m_onUpdate();
 }
 
 void DownloadManager::ResumeAll() {
@@ -279,6 +305,8 @@ void DownloadManager::ResumeAll() {
             t->Start();
         }
     }
+    SaveTasks();
+    if (m_onUpdate) m_onUpdate();
 }
 
 std::vector<DownloadTaskInfo> DownloadManager::GetAllSnapshots() const {

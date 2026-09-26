@@ -552,6 +552,15 @@ LRESULT MainWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             if (wParam == VK_DELETE) {
                 HandleCommand(ID_DOWNLOAD_DELETE);
                 return 0;
+            } else if (wParam == VK_F2) {
+                HandleCommand(ID_DOWNLOAD_RENAME);
+                return 0;
+            } else if (wParam == VK_F5) {
+                HandleCommand(ID_DOWNLOAD_START);
+                return 0;
+            } else if (wParam == VK_F6) {
+                HandleCommand(ID_DOWNLOAD_PAUSE);
+                return 0;
             } else if (wParam == 'A' && isCtrl) {
                 const auto& vis = m_renderer.GetVisibleTaskIds();
                 m_selectedTaskIds.clear();
@@ -798,21 +807,39 @@ void MainWindow::HandleCommand(int id) {
             break;
         }
 
-        case ID_DOWNLOAD_DELETE: {
+        case ID_DOWNLOAD_RENAME: {
+            std::wstring targetId = m_selectedTaskId;
+            if (targetId.empty() && !m_selectedTaskIds.empty()) {
+                targetId = *m_selectedTaskIds.begin();
+            }
+            if (!targetId.empty()) {
+                DownloadTaskInfo info;
+                if (DownloadManager::Instance().GetSnapshot(targetId, info)) {
+                    std::wstring newFilename;
+                    if (Dialogs::ShowRenameDialog(m_hwnd, info.filename, newFilename)) {
+                        if (!newFilename.empty() && newFilename != info.filename) {
+                            DownloadManager::Instance().RenameTask(targetId, newFilename);
+                            Invalidate();
+                        }
+                    }
+                }
+            }
+            break;
+        }
+
+        case ID_DOWNLOAD_DELETE:
+        case ID_DOWNLOAD_DELETE_WITH_FILE: {
             if (m_selectedTaskIds.empty() && !m_selectedTaskId.empty()) {
                 m_selectedTaskIds.insert(m_selectedTaskId);
             }
             if (!m_selectedTaskIds.empty()) {
-                std::wstring prompt;
-                if (m_selectedTaskIds.size() == 1) {
-                    prompt = LStr(StrId::DlgDeletePrompt);
-                } else {
-                    prompt = std::to_wstring(m_selectedTaskIds.size()) + L" adet seçili görevi listeden silmek istediğinize emin misiniz?";
-                }
-                int res = MessageBoxW(m_hwnd, prompt.c_str(), LStr(StrId::DlgDeleteTitle), MB_YESNO | MB_ICONQUESTION);
-                if (res == IDYES) {
-                    for (const auto& tid : m_selectedTaskIds) {
-                        DownloadManager::Instance().DeleteTask(tid, false);
+                bool defaultDelete = (id == ID_DOWNLOAD_DELETE_WITH_FILE);
+                bool deleteFile = defaultDelete;
+                int count = (int)m_selectedTaskIds.size();
+                if (Dialogs::ShowDeleteConfirmDialog(m_hwnd, count, deleteFile, defaultDelete)) {
+                    std::vector<std::wstring> toDelete(m_selectedTaskIds.begin(), m_selectedTaskIds.end());
+                    for (const auto& tid : toDelete) {
+                        DownloadManager::Instance().DeleteTask(tid, deleteFile);
                     }
                     m_selectedTaskIds.clear();
                     m_selectedTaskId.clear();
@@ -966,12 +993,14 @@ void MainWindow::ShowTaskContextMenu(int screenX, int screenY, const std::wstrin
         AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_OPENFILE, LStr(StrId::CtxOpenFile));
         AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_OPENFOLDER, LStr(StrId::CtxOpenFolder));
     }
+    AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_RENAME, LStr(StrId::CtxRename));
     AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_PROPERTIES, LStr(StrId::CtxCopyUrl));
     if (info.state != DownloadState::Completed) {
         AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_UPDATE_URL, LStr(StrId::CtxUpdateUrl));
     }
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-    AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_DELETE, LStr(StrId::CtxDeleteTask));
+    AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_DELETE, LStr(StrId::CtxDeleteKeepFile));
+    AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_DELETE_WITH_FILE, LStr(StrId::CtxDeleteWithFile));
 
     int cmd = TrackPopupMenu(hMenu, TPM_LEFTALIGN | TPM_TOPALIGN | TPM_RETURNCMD, screenX, screenY, 0, m_hwnd, NULL);
     DestroyMenu(hMenu);
@@ -995,6 +1024,9 @@ void MainWindow::ShowTaskContextMenu(int screenX, int screenY, const std::wstrin
         size_t idx = dir.find_last_of(L"\\/");
         if (idx != std::wstring::npos) dir = dir.substr(0, idx);
         ShellExecuteW(NULL, L"open", dir.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    } else if (cmd == ID_DOWNLOAD_RENAME) {
+        m_selectedTaskId = taskId;
+        HandleCommand(ID_DOWNLOAD_RENAME);
     } else if (cmd == ID_DOWNLOAD_PROPERTIES) {
         if (OpenClipboard(m_hwnd)) {
             EmptyClipboard();
@@ -1014,25 +1046,13 @@ void MainWindow::ShowTaskContextMenu(int screenX, int screenY, const std::wstrin
                 DownloadManager::Instance().UpdateTaskUrl(taskId, newUrl);
             }
         }
-    } else if (cmd == ID_DOWNLOAD_DELETE) {
-        if (m_selectedTaskIds.size() > 1 && m_selectedTaskIds.count(taskId)) {
-            std::wstring prompt = std::to_wstring(m_selectedTaskIds.size()) + L" adet seçili görevi listeden silmek istediğinize emin misiniz?";
-            int res = MessageBoxW(m_hwnd, prompt.c_str(), LStr(StrId::DlgDeleteTitle), MB_YESNO | MB_ICONQUESTION);
-            if (res == IDYES) {
-                for (const auto& tid : m_selectedTaskIds) {
-                    DownloadManager::Instance().DeleteTask(tid, false);
-                }
-                m_selectedTaskIds.clear();
-                m_selectedTaskId.clear();
-            }
-        } else {
-            int res = MessageBoxW(m_hwnd, LStr(StrId::DlgDeletePrompt), LStr(StrId::DlgDeleteTitle), MB_YESNO | MB_ICONQUESTION);
-            if (res == IDYES) {
-                DownloadManager::Instance().DeleteTask(taskId, false);
-                m_selectedTaskIds.erase(taskId);
-                if (m_selectedTaskId == taskId) m_selectedTaskId.clear();
-            }
+    } else if (cmd == ID_DOWNLOAD_DELETE || cmd == ID_DOWNLOAD_DELETE_WITH_FILE) {
+        if (!m_selectedTaskIds.count(taskId)) {
+            m_selectedTaskIds.clear();
+            m_selectedTaskIds.insert(taskId);
+            m_selectedTaskId = taskId;
         }
+        HandleCommand(cmd);
     }
     Invalidate();
 }

@@ -209,6 +209,14 @@ enum class StrId {
     CtxCopyUrl,
     CtxDeleteTask,
     CtxOpenGety,
+    CtxRename,
+    DlgRenameTitle,
+    DlgRenamePrompt,
+    CtxDeleteKeepFile,
+    CtxDeleteWithFile,
+    DlgDeleteKeepFileCheck,
+    DlgDeleteConfirmPrompt,
+    DlgDeleteMultiplePrompt,
 
     // Misc
     DlgOptSaveDir,

@@ -38,6 +38,7 @@ public:
     void RedownloadTask(const std::wstring& id);
     void DeleteTask(const std::wstring& id, bool deleteFile);
     bool UpdateTaskUrl(const std::wstring& id, const std::wstring& newUrl);
+    bool RenameTask(const std::wstring& id, const std::wstring& newFilename);
 
     void MoveTaskUp(const std::wstring& id);
     void MoveTaskDown(const std::wstring& id);

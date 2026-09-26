@@ -79,6 +79,28 @@ Gety brings AI model acquisition directly into a fast, multi-threaded native dow
 
 ---
 
+## 🚀 Recent Updates & Bug Fixes
+
+### 1. Robust Download Pause & Worker Thread Management
+- **Eliminated Unwanted Auto-Resume:** Fixed a critical race condition where terminating segment workers during pause reported simulated network dropouts, unintentionally triggering the engine's automatic reconnect/retry loop after a 2-second timeout.
+- **Immediate Probe Cancellation:** Added atomic cancellation tracking (`m_pauseRequested`) and bound in-flight probe session/request handles (`m_hProbeSession`, `m_hProbeRequest`) so probing connections abort immediately upon user pause instead of launching background workers.
+- **Thread Lifetime Safety:** Replaced uncoordinated thread detachment with deterministic `join()` operations and handle cleanup across all `SegmentWorker` instances, eliminating potential use-after-free exceptions and memory corruptions.
+- **Unified State Coverage:** Pause now functions deterministically across all download states, including queued downloads, active multi-segment HTTP transfers, and external `yt-dlp` stream extraction processes.
+
+### 2. Native In-Place Task & File Renaming (`F2` / Context Menu)
+- **Keyboard & Menu Integration:** Added support for renaming tasks directly using the **F2** shortcut key or through the right-click context menu (✏ *Yeniden Adlandır / Rename*).
+- **Physical Disk Synchronization:** Automatically pauses active transfers, synchronizes file changes on disk using Win32 `MoveFileW` (supporting both multi-part `.gety` temporary files and completed assets), updates task metadata and file paths, and seamlessly resumes downloading if it was running.
+- **Custom Frameless Modal Dialog:** Designed a sleek, dark-themed frameless dialog featuring pre-selection of the filename stem (excluding the file extension for instant editing) and strict Win32 forbidden character sanitization (`\ / : * ? " < > |`).
+
+### 3. Granular Deletion Controls (File Retention vs. Permanent Disk Purge)
+- **Eliminated Accidental Data Loss:** Addressed the lack of disk file retention options during task removal. Task deletion no longer assumes arbitrary disk deletion behavior.
+- **Dual-Action Context Menu:**
+  - 🗑 **Remove from List (Keep File)**: Instantly clears the task entry and transfer statistics while strictly preserving the downloaded payload on disk.
+  - ❌ **Delete File from Disk...**: Triggers deletion along with physical removal of all associated disk files and metadata.
+- **Interactive Dark Confirmation Dialog:** Features an explicit confirmation popup with an unchecked-by-default checkbox (`[ ] İndirilen dosyayı da diskten kalıcı olarak sil` / `Permanently delete downloaded file from disk as well`), ensuring files remain safely on disk unless explicitly instructed otherwise.
+
+---
+
 ## 🛠️ Building from Source
 
 ### Prerequisites

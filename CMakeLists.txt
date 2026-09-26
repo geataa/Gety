@@ -66,7 +66,7 @@ set(SOURCES
 add_executable(Gety WIN32 ${SOURCES})
 
 target_compile_options(Gety PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 /O2 /Oi /Ot /Zi>
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 $<$<CONFIG:Release>:/O2 /Oi /Ot> /Zi>
 )
 
 target_link_options(Gety PRIVATE
