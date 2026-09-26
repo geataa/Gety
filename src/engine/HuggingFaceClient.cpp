@@ -331,7 +331,7 @@ HuggingFaceFetchResult HuggingFaceClient::FetchModelTree(const HuggingFaceModelS
     }
 
     HINTERNET hSession = WinHttpOpen(
-        L"Gety/1.9.6 (Windows; Win64; x64)",
+        L"Gety/1.0.1 (Windows; Win64; x64)",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,
@@ -587,7 +587,7 @@ bool HuggingFaceClient::ResolveDownloadUrl(const std::wstring& downloadUrl,
     }
 
     HINTERNET hSession = WinHttpOpen(
-        L"Gety/1.9.6 (Windows; Win64; x64)",
+        L"Gety/1.0.1 (Windows; Win64; x64)",
         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
         WINHTTP_NO_PROXY_NAME,
         WINHTTP_NO_PROXY_BYPASS,

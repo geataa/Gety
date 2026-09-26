@@ -1560,9 +1560,9 @@ void Direct2DRenderer::RenderBottomBar(
     double totMB = (double)totalBytesAll / (1024.0 * 1024.0);
 
     bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
-    swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.0   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
-                                 (activeTasksCount == 1 ? L"⚡ Gety v1.0   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
-                                                          L"⚡ Gety v1.0   |   ● %d Active Tasks   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB"),
+    swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.0.1   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                 (activeTasksCount == 1 ? L"⚡ Gety v1.0.1   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                                          L"⚡ Gety v1.0.1   |   ● %d Active Tasks   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB"),
         activeTasksCount,
         speedMB,
         dlMB,
