@@ -162,7 +162,9 @@ We believe in radical transparency: AI-assisted development empowers solo creato
 
 ## 🎮 Also From SkySoft / geataa on Steam
 
-I'm a game developer first — Gety and my other tools are what I build in the time left over from making games (*oyunlardan arda kalan zamanda bunları yapıyorum :D*). Check out my two published titles on Steam:
+> By day, I work full-time as a software engineer. Evenings and weekends are dedicated to my passion for indie game development. In the spare moments left over from crafting games, I build tailored, high-performance native tools like Gety through modern **vibe coding** with AI.
+> 
+> When I'm not writing native tools, check out the game worlds I'm bringing to life on Steam:
 
 <div align="center">
 
