@@ -55,8 +55,17 @@ void Config::Load() {
     playSoundOnComplete = GetPrivateProfileIntW(L"Automation", L"PlaySoundOnComplete", playSoundOnComplete ? 1 : 0, ini) != 0;
     autoShutdownOnComplete = GetPrivateProfileIntW(L"Automation", L"AutoShutdownOnComplete", autoShutdownOnComplete ? 1 : 0, ini) != 0;
     minimizeToTrayOnClose = GetPrivateProfileIntW(L"Automation", L"MinimizeToTrayOnClose", minimizeToTrayOnClose ? 1 : 0, ini) != 0;
-    startWithWindows = GetPrivateProfileIntW(L"Automation", L"StartWithWindows", startWithWindows ? 1 : 0, ini) != 0;
-    if (IsAutoStartEnabled() != startWithWindows) {
+    bool iniStartWithWindows = GetPrivateProfileIntW(L"Automation", L"StartWithWindows", startWithWindows ? 1 : 0, ini) != 0;
+    if (iniStartWithWindows) {
+        startWithWindows = true;
+        // Self-heal registry path in case portable Gety.exe was moved or copied to a new PC
+        wchar_t exePath[2048] = { 0 };
+        GetModuleFileNameW(NULL, exePath, _countof(exePath));
+        std::wstring expectedCmd = BuildAutoStartCommand(exePath);
+        if (GetAutoStartCommand() != expectedCmd) {
+            SetAutoStartEnabled(true);
+        }
+    } else {
         startWithWindows = IsAutoStartEnabled();
     }
 
@@ -115,38 +124,77 @@ void Config::Save() {
     WritePrivateProfileStringW(L"Window", L"BottomHeight", std::to_wstring(bottomPaneHeight).c_str(), ini);
 }
 
-bool Config::IsAutoStartEnabled() const {
+std::wstring Config::BuildAutoStartCommand(const std::wstring& exePath) {
+    if (exePath.empty()) return L"";
+    return L"\"" + exePath + L"\" --minimized";
+}
+
+std::wstring Config::ReadAutoStartValue(const wchar_t* valueName) const {
+    if (!valueName || !*valueName) return L"";
     HKEY hKey = NULL;
     if (RegOpenKeyExW(HKEY_CURRENT_USER,
                       L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
                       0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        wchar_t buf[MAX_PATH] = { 0 };
-        DWORD bufSize = sizeof(buf);
+        wchar_t buf[2048] = { 0 };
+        DWORD bufSize = sizeof(buf) - sizeof(wchar_t);
         DWORD type = 0;
-        LONG res = RegQueryValueExW(hKey, L"Gety", NULL, &type, (LPBYTE)buf, &bufSize);
+        LONG res = RegQueryValueExW(hKey, valueName, NULL, &type, (LPBYTE)buf, &bufSize);
         RegCloseKey(hKey);
-        return (res == ERROR_SUCCESS && type == REG_SZ && bufSize > 0);
+        if (res == ERROR_SUCCESS && (type == REG_SZ || type == REG_EXPAND_SZ) && bufSize > sizeof(wchar_t)) {
+            buf[_countof(buf) - 1] = L'\0';
+            return std::wstring(buf);
+        }
     }
-    return false;
+    return L"";
+}
+
+bool Config::IsAutoStartValueEnabled(const wchar_t* valueName) const {
+    return !ReadAutoStartValue(valueName).empty();
+}
+
+bool Config::SetAutoStartValue(bool enable, const wchar_t* valueName) const {
+    if (!valueName || !*valueName) return false;
+    HKEY hKey = NULL;
+    REGSAM access = KEY_SET_VALUE | KEY_QUERY_VALUE;
+    LONG openRes = RegOpenKeyExW(HKEY_CURRENT_USER,
+                                 L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                 0, access, &hKey);
+    if (openRes != ERROR_SUCCESS && enable) {
+        openRes = RegCreateKeyExW(HKEY_CURRENT_USER,
+                                  L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+                                  0, NULL, REG_OPTION_NON_VOLATILE, access, NULL, &hKey, NULL);
+    }
+    if (openRes != ERROR_SUCCESS) return false;
+
+    bool ok = false;
+    if (enable) {
+        wchar_t exePath[2048] = { 0 };
+        DWORD len = GetModuleFileNameW(NULL, exePath, _countof(exePath));
+        if (len > 0 && len < _countof(exePath)) {
+            std::wstring cmd = BuildAutoStartCommand(std::wstring(exePath, len));
+            LONG res = RegSetValueExW(hKey, valueName, 0, REG_SZ,
+                                      (const BYTE*)cmd.c_str(),
+                                      (DWORD)((cmd.length() + 1) * sizeof(wchar_t)));
+            ok = (res == ERROR_SUCCESS);
+        }
+    } else {
+        LONG res = RegDeleteValueW(hKey, valueName);
+        ok = (res == ERROR_SUCCESS || res == ERROR_FILE_NOT_FOUND);
+    }
+    RegCloseKey(hKey);
+    return ok;
+}
+
+std::wstring Config::GetAutoStartCommand() const {
+    return ReadAutoStartValue(L"Gety");
+}
+
+bool Config::IsAutoStartEnabled() const {
+    return IsAutoStartValueEnabled(L"Gety");
 }
 
 void Config::SetAutoStartEnabled(bool enable) {
-    HKEY hKey = NULL;
-    if (RegOpenKeyExW(HKEY_CURRENT_USER,
-                      L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
-                      0, KEY_SET_VALUE, &hKey) == ERROR_SUCCESS) {
-        if (enable) {
-            wchar_t exePath[MAX_PATH] = { 0 };
-            GetModuleFileNameW(NULL, exePath, MAX_PATH);
-            std::wstring cmd = L"\"" + std::wstring(exePath) + L"\" --minimized";
-            RegSetValueExW(hKey, L"Gety", 0, REG_SZ,
-                          (const BYTE*)cmd.c_str(),
-                          (DWORD)((cmd.length() + 1) * sizeof(wchar_t)));
-        } else {
-            RegDeleteValueW(hKey, L"Gety");
-        }
-        RegCloseKey(hKey);
-    }
+    SetAutoStartValue(enable, L"Gety");
 }
 
 } // namespace Gety

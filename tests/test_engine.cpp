@@ -7,8 +7,11 @@
 #include "../src/core/Types.h"
 #include "../src/core/BatchExpander.h"
 #include "../src/core/I18n.h"
+#include "../src/core/Config.h"
+#include "../src/core/CliArgs.h"
 #include "../src/engine/WinHttpUtils.h"
 #include "../src/engine/DownloadTask.h"
+#include "../src/engine/DownloadManager.h"
 #include "../src/engine/MediaExtractor.h"
 #include "../src/engine/OllamaClient.h"
 #include "../src/engine/HuggingFaceClient.h"
@@ -485,6 +488,143 @@ int main(int argc, char* argv[]) {
         std::wcout << L"    Pause, Rename, and Delete File Preservation PASSED!" << std::endl;
     }
 
-    std::wcout << L"\nAll 16 Tests Completed Successfully! Gety Engine is 100% Rock Solid." << std::endl;
+    // Test 17: JsonParser 64-bit integer precision (>4GB) & ParseMediaBytes ('~' handling)
+    std::wcout << L"[17] Testing 64-bit JSON Byte Counts & Large File Sizes..." << std::endl;
+    {
+        std::string largeJson = R"({"totalBytes": 10737418240, "downloadedBytes": 5368709120, "smallInt": 42})";
+        JsonParser jp(largeJson);
+        JValue obj = jp.Parse();
+        assert(obj.getUInt64("totalBytes") == 10737418240ULL); // 10 GiB exact
+        assert(obj.getUInt64("downloadedBytes") == 5368709120ULL); // 5 GiB exact
+        assert(obj.getInt("smallInt") == 42);
+        std::wcout << L"    64-bit JSON Integer Precision PASSED!" << std::endl;
+    }
+
+    // Test 18: v5 DPAPI State Persistence + Partial Segment & Disk Reconciliation
+    std::wcout << L"[18] Testing v5 Partial State Persistence & Disk Reconciliation..." << std::endl;
+    {
+        std::wstring origPortableDir = Config::Instance().GetPortableDataDir();
+        std::wstring testPortableDir = std::filesystem::current_path().wstring() + L"\\test_persist_data";
+        std::wstring testSaveDir = std::filesystem::current_path().wstring() + L"\\test_persist_downloads";
+        std::filesystem::remove_all(testPortableDir);
+        std::filesystem::remove_all(testSaveDir);
+        std::filesystem::create_directories(testPortableDir);
+        std::filesystem::create_directories(testSaveDir);
+
+        Config::Instance().SetPortableDataDir(testPortableDir);
+
+        // Prepare a completed media file on disk whose saved state was stale Downloading
+        std::wstring finishedMediaPath = testSaveDir + L"\\FinishedVideo.mp4";
+        {
+            std::ofstream f(finishedMediaPath, std::ios::binary);
+            std::string dummy(4096, 'V');
+            f.write(dummy.data(), (std::streamsize)dummy.size());
+        }
+
+        // Prepare an incomplete media .part file on disk
+        std::wstring partialMediaPath = testSaveDir + L"\\PartialVideo.mp4.part";
+        {
+            std::ofstream f(partialMediaPath, std::ios::binary);
+            std::string dummy(2048, 'P');
+            f.write(dummy.data(), (std::streamsize)dummy.size());
+        }
+
+        // Simulate a v5 tasks.json written before unclean shutdown / restart
+        std::vector<SegmentInfo> segs(2);
+        segs[0].id = 0; segs[0].startByte = 0; segs[0].endByte = 999999; segs[0].downloadedBytes = 250000; segs[0].currentOffset = 250000; segs[0].status = 2;
+        segs[1].id = 1; segs[1].startByte = 1000000; segs[1].endByte = 1999999; segs[1].downloadedBytes = 150000; segs[1].currentOffset = 1150000; segs[1].status = 2;
+
+        auto httpPartial = std::make_shared<DownloadTask>(L"https://example.com/archive.bin", testSaveDir, L"Software", 2, L"archive.bin");
+        httpPartial->RestoreMetadata(L"task-http-partial", DownloadState::Downloading, L"2026-11-14 12:00", L"", L"Software",
+                                     2000000ULL, 400000ULL, true, true, L"https://cdn.example.com/archive.bin", L"", segs);
+
+        auto staleFinishedMedia = std::make_shared<DownloadTask>(L"https://youtube.com/watch?v=123", testSaveDir, L"Video", 1, L"FinishedVideo.mp4", true, L"best");
+        staleFinishedMedia->RestoreMetadata(L"task-media-finished", DownloadState::Paused, L"2026-11-14 12:01", L"", L"Video",
+                                            4096ULL, 0ULL, true, false, L"", L"", {});
+
+        auto missingCompleted = std::make_shared<DownloadTask>(L"https://example.com/moved.zip", testSaveDir, L"Archives", 4, L"moved.zip");
+        missingCompleted->RestoreMetadata(L"task-moved-done", DownloadState::Completed, L"2026-11-14 12:02", L"2026-11-14 12:05", L"Archives",
+                                          1234567ULL, 1234567ULL, true, false, L"", L"", {});
+
+        // Build encrypted v5 tasks.json through DPAPI directly and load via DownloadManager
+        auto snap1 = httpPartial->GetSnapshot();
+        auto snap2 = staleFinishedMedia->GetSnapshot();
+        auto snap3 = missingCompleted->GetSnapshot();
+        assert(snap1.state == DownloadState::Paused); // Interrupted Downloading becomes Paused
+        assert(snap1.totalBytes == 2000000ULL);
+        assert(snap1.downloadedBytes == 400000ULL);
+        assert(snap1.segments.size() == 2);
+        assert(snap1.segments[0].downloadedBytes == 250000ULL);
+        assert(snap1.segments[1].downloadedBytes == 150000ULL);
+
+        assert(snap2.state == DownloadState::Completed); // Reconciled from FinishedVideo.mp4 on disk!
+        assert(snap2.totalBytes == 4096ULL);
+        assert(snap2.downloadedBytes == 4096ULL);
+
+        assert(snap3.state == DownloadState::Completed); // Preserved totalBytes even after external move!
+        assert(snap3.totalBytes == 1234567ULL);
+        assert(snap3.downloadedBytes == 1234567ULL);
+
+        // Test DownloadManager end-to-end SaveTasks + LoadTasks + .bak recovery
+        std::wstring id1 = DownloadManager::Instance().AddTask(L"https://example.com/partial.iso", testSaveDir, L"Software", 4, false, L"partial.iso");
+        DownloadManager::Instance().PauseTask(id1);
+        assert(std::filesystem::exists(testPortableDir + L"\\tasks.json"));
+
+        // Corrupt primary tasks.json after creating a backup save
+        DownloadManager::Instance().SaveTasks();
+        assert(std::filesystem::exists(testPortableDir + L"\\tasks.json.bak"));
+        {
+            std::ofstream corrupt(testPortableDir + L"\\tasks.json", std::ios::trunc);
+            corrupt << "{ broken json ";
+        }
+        DownloadManager::Instance().LoadTasks(); // Should recover cleanly from tasks.json.bak!
+        DownloadTaskInfo recoveredSnap;
+        assert(DownloadManager::Instance().GetSnapshot(id1, recoveredSnap));
+        assert(recoveredSnap.filename == L"partial.iso");
+
+        // Verify partial media .part size pickup on restore
+        auto mediaPartTask = std::make_shared<DownloadTask>(L"https://youtube.com/watch?v=999", testSaveDir, L"Video", 1, L"PartialVideo.mp4", true, L"best");
+        mediaPartTask->RestoreMetadata(L"task-media-part", DownloadState::Paused, L"2026-11-14 12:03", L"", L"Video",
+                                       8192ULL, 0ULL, true, false, L"", L"", {});
+        assert(mediaPartTask->GetSnapshot().downloadedBytes == 2048ULL);
+
+        DownloadManager::Instance().DeleteTask(id1, true);
+        Config::Instance().SetPortableDataDir(origPortableDir);
+        std::filesystem::remove_all(testPortableDir);
+        std::filesystem::remove_all(testSaveDir);
+        std::wcout << L"    v5 Persistence, Backup Recovery & Disk Reconciliation PASSED!" << std::endl;
+    }
+
+    // Test 19: CLI Flag Separation (--minimized never treated as URL) & Registry AutoStart Roundtrip
+    std::wcout << L"[19] Testing CLI Autostart Flag Parsing & Registry Helper..." << std::endl;
+    {
+        auto optsMin = ParseCliArgs(L"--minimized");
+        assert(optsMin.startMinimized == true);
+        assert(optsMin.urls.empty());
+
+        auto optsAuto = ParseCliArgs(L"  --autostart  https://example.com/file.zip  --tray ");
+        assert(optsAuto.startMinimized == true);
+        assert(optsAuto.urls.size() == 1);
+        assert(optsAuto.urls[0] == L"https://example.com/file.zip");
+
+        auto optsQuoted = ParseCliArgs(L"\"https://example.com/with space.zip\"");
+        assert(optsQuoted.startMinimized == false);
+        assert(optsQuoted.urls.size() == 1);
+        assert(optsQuoted.urls[0] == L"https://example.com/with space.zip");
+
+        std::wstring expectedCmd = Config::BuildAutoStartCommand(L"C:\\Apps\\Gety.exe");
+        assert(expectedCmd == L"\"C:\\Apps\\Gety.exe\" --minimized");
+
+        const wchar_t* testRegVal = L"GetyEngineTestAutostart";
+        assert(Config::Instance().SetAutoStartValue(true, testRegVal));
+        assert(Config::Instance().IsAutoStartValueEnabled(testRegVal));
+        std::wstring readCmd = Config::Instance().ReadAutoStartValue(testRegVal);
+        assert(readCmd.find(L" --minimized") != std::wstring::npos);
+        assert(Config::Instance().SetAutoStartValue(false, testRegVal));
+        assert(!Config::Instance().IsAutoStartValueEnabled(testRegVal));
+        std::wcout << L"    CLI Flag Separation & Registry AutoStart Roundtrip PASSED!" << std::endl;
+    }
+
+    std::wcout << L"\nAll 19 Tests Completed Successfully! Gety Engine is 100% Rock Solid." << std::endl;
     return 0;
 }

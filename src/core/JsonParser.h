@@ -14,6 +14,8 @@ enum class JType { Null, Bool, Number, String, Array, Object };
 struct JValue {
     JType type = JType::Null;
     bool bVal = false;
+    bool isInt = false;
+    int64_t iVal = 0;
     double nVal = 0.0;
     std::string sVal;
     std::vector<JValue> arr;
@@ -29,7 +31,23 @@ struct JValue {
     int64_t getInt(const std::string& k, int64_t def = 0) const {
         if (type != JType::Object) return def;
         auto it = obj.find(k);
-        if (it != obj.end() && it->second.type == JType::Number) return static_cast<int64_t>(it->second.nVal);
+        if (it != obj.end() && it->second.type == JType::Number) {
+            return it->second.isInt ? it->second.iVal : static_cast<int64_t>(it->second.nVal);
+        }
+        return def;
+    }
+
+    uint64_t getUInt64(const std::string& k, uint64_t def = 0) const {
+        if (type != JType::Object) return def;
+        auto it = obj.find(k);
+        if (it != obj.end() && it->second.type == JType::Number) {
+            if (it->second.isInt && it->second.iVal >= 0) {
+                return static_cast<uint64_t>(it->second.iVal);
+            }
+            if (it->second.nVal >= 0.0) {
+                return static_cast<uint64_t>(it->second.nVal);
+            }
+        }
         return def;
     }
 
@@ -217,19 +235,34 @@ private:
         val.type = JType::Number;
         size_t start = m_pos;
         if (m_pos < m_src.length() && m_src[m_pos] == '-') m_pos++;
+        bool hasDecimalOrExp = false;
         while (m_pos < m_src.length()) {
             char c = m_src[m_pos];
-            if ((c >= '0' && c <= '9') || c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
+            if (c >= '0' && c <= '9') {
+                m_pos++;
+            } else if (c == '.' || c == 'e' || c == 'E' || c == '+' || c == '-') {
+                hasDecimalOrExp = true;
                 m_pos++;
             } else {
                 break;
             }
         }
         std::string numStr = m_src.substr(start, m_pos - start);
+        if (!hasDecimalOrExp && !numStr.empty() && numStr != "-") {
+            try {
+                size_t idx = 0;
+                val.iVal = std::stoll(numStr, &idx, 10);
+                if (idx == numStr.size()) {
+                    val.isInt = true;
+                }
+            } catch (...) {
+                val.isInt = false;
+            }
+        }
         try {
             val.nVal = std::stod(numStr);
         } catch (...) {
-            val.nVal = 0.0;
+            val.nVal = val.isInt ? static_cast<double>(val.iVal) : 0.0;
         }
         return val;
     }

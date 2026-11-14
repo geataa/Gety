@@ -125,10 +125,7 @@ void SegmentWorker::WorkerProc() {
             return;
         }
 
-        HINTERNET hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                                         WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                         WINHTTP_NO_PROXY_NAME,
-                                         WINHTTP_NO_PROXY_BYPASS, 0);
+        HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kBrowserUserAgent, true, false);
         if (!hSession) {
             m_status = 4;
             m_isRunning = false;
@@ -136,14 +133,6 @@ void SegmentWorker::WorkerProc() {
             return;
         }
         m_hSession = hSession;
-
-        DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-        WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
-
-        DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-        WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
-
-        WinHttpSetTimeouts(hSession, 15000, 15000, 20000, 20000);
 
         HINTERNET hConnect = WinHttpConnect(hSession, parts.host.c_str(), parts.port, 0);
         if (!hConnect) {

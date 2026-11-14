@@ -1,11 +1,38 @@
 #include "Direct2DRenderer.h"
 #include "Theme.h"
+#include "../core/Config.h"
 #include "../core/I18n.h"
+#include "../engine/WinHttpUtils.h"
 #include <algorithm>
 #include <cwchar>
 #include <wincodec.h>
 
 namespace Gety {
+
+static bool MatchesTaskCategory(const DownloadTaskInfo& t, CategoryFilterType cat) {
+    StrId detected = WinHttpUtils::DetectCategoryFromFilename(t.filename);
+    switch (cat) {
+        case CategoryFilterType::All:         return true;
+        case CategoryFilterType::Unfinished:  return (t.state != DownloadState::Completed && t.state != DownloadState::Deleted);
+        case CategoryFilterType::Downloading: return (t.state == DownloadState::Downloading || t.state == DownloadState::Connecting);
+        case CategoryFilterType::Paused:      return (t.state == DownloadState::Paused);
+        case CategoryFilterType::Downloaded:  return (t.state == DownloadState::Completed);
+        case CategoryFilterType::Trash:       return (t.state == DownloadState::Failed);
+        case CategoryFilterType::Music:
+            return (t.category == LStr(StrId::CatMusic) || t.category == L"Müzik" || t.category == L"Music" || detected == StrId::CatMusic);
+        case CategoryFilterType::Video:
+            return (t.category == LStr(StrId::CatVideo) || t.category == L"Video" || detected == StrId::CatVideo);
+        case CategoryFilterType::Software:
+            return (t.category == LStr(StrId::CatSoftware) || t.category == L"Yazılım" || t.category == L"Software" ||
+                    t.category == LStr(StrId::CatArchives) || t.category == L"Sıkıştırılmış" || detected == StrId::CatSoftware || detected == StrId::CatArchives);
+        case CategoryFilterType::Documents:
+            return (t.category == LStr(StrId::CatDocuments) || t.category == L"Belgeler" || t.category == L"Documents" || detected == StrId::CatDocuments);
+        case CategoryFilterType::AI:
+            return (t.category == LStr(StrId::CatAI) || t.category == L"Yapay Zeka" || t.category == L"AI" || detected == StrId::CatAI);
+        default:
+            return true;
+    }
+}
 
 Direct2DRenderer::Direct2DRenderer() {
 }
@@ -870,17 +897,17 @@ void Direct2DRenderer::RenderCategoryCard(const std::vector<DownloadTaskInfo>& t
     int countMusic = 0, countVideo = 0, countSoftware = 0, countDocs = 0, countAI = 0;
 
     for (const auto& t : tasks) {
-        if (t.state != DownloadState::Completed && t.state != DownloadState::Deleted) countUnfinished++;
-        if (t.state == DownloadState::Downloading || t.state == DownloadState::Connecting) countDownloading++;
-        else if (t.state == DownloadState::Paused) countPaused++;
-        else if (t.state == DownloadState::Completed) countCompleted++;
-        else if (t.state == DownloadState::Failed) countTrash++;
+        if (MatchesTaskCategory(t, CategoryFilterType::Unfinished)) countUnfinished++;
+        if (MatchesTaskCategory(t, CategoryFilterType::Downloading)) countDownloading++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Paused)) countPaused++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Downloaded)) countCompleted++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Trash)) countTrash++;
 
-        if (t.category == L"Müzik" || t.filename.ends_with(L".mp3") || t.filename.ends_with(L".flac") || t.filename.ends_with(L".wav")) countMusic++;
-        else if (t.category == L"Video" || t.filename.ends_with(L".mp4") || t.filename.ends_with(L".mkv") || t.filename.ends_with(L".avi")) countVideo++;
-        else if (t.category == L"Yazılım" || t.filename.ends_with(L".exe") || t.filename.ends_with(L".msi") || t.filename.ends_with(L".zip")) countSoftware++;
-        else if (t.category == L"Belgeler" || t.filename.ends_with(L".pdf") || t.filename.ends_with(L".doc") || t.filename.ends_with(L".txt")) countDocs++;
-        else if (t.category == LStr(StrId::CatAI) || t.category == L"Yapay Zeka" || t.category == L"AI" || t.filename.ends_with(L".gguf") || t.filename.ends_with(L".safetensors") || t.filename.ends_with(L".onnx")) countAI++;
+        if (MatchesTaskCategory(t, CategoryFilterType::Music)) countMusic++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Video)) countVideo++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Software)) countSoftware++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::Documents)) countDocs++;
+        else if (MatchesTaskCategory(t, CategoryFilterType::AI)) countAI++;
     }
 
     D2D1_RECT_F catClipRect = D2D1::RectF(
@@ -974,22 +1001,9 @@ void Direct2DRenderer::RenderTaskListCard(
 ) {
     std::vector<const DownloadTaskInfo*> filteredTasks;
     for (const auto& t : tasks) {
-        bool match = false;
-        switch (activeCategory) {
-            case CategoryFilterType::All: match = true; break;
-            case CategoryFilterType::Unfinished: match = (t.state != DownloadState::Completed && t.state != DownloadState::Deleted); break;
-            case CategoryFilterType::Downloading: match = (t.state == DownloadState::Downloading || t.state == DownloadState::Connecting); break;
-            case CategoryFilterType::Paused: match = (t.state == DownloadState::Paused); break;
-            case CategoryFilterType::Downloaded: match = (t.state == DownloadState::Completed); break;
-            case CategoryFilterType::Trash: match = (t.state == DownloadState::Failed); break;
-            case CategoryFilterType::Music: match = (t.category == L"Müzik" || t.filename.ends_with(L".mp3") || t.filename.ends_with(L".flac")); break;
-            case CategoryFilterType::Video: match = (t.category == L"Video" || t.filename.ends_with(L".mp4") || t.filename.ends_with(L".mkv")); break;
-            case CategoryFilterType::Software: match = (t.category == L"Yazılım" || t.filename.ends_with(L".exe") || t.filename.ends_with(L".zip")); break;
-            case CategoryFilterType::Documents: match = (t.category == L"Belgeler" || t.filename.ends_with(L".pdf") || t.filename.ends_with(L".txt")); break;
-            case CategoryFilterType::AI: match = (t.category == LStr(StrId::CatAI) || t.category == L"Yapay Zeka" || t.category == L"AI" || t.filename.ends_with(L".gguf") || t.filename.ends_with(L".safetensors") || t.filename.ends_with(L".onnx")); break;
-            default: match = true; break;
+        if (MatchesTaskCategory(t, activeCategory)) {
+            filteredTasks.push_back(&t);
         }
-        if (match) filteredTasks.push_back(&t);
     }
 
     D2D1_ROUNDED_RECT cardRR = D2D1::RoundedRect(m_rcTaskListCard, 8.0f * m_dpiScale, 8.0f * m_dpiScale);
@@ -1076,9 +1090,14 @@ void Direct2DRenderer::RenderTaskListCard(
                 double dlMB = (double)pT->downloadedBytes / (1024.0 * 1024.0);
                 double totMB = (double)pT->totalBytes / (1024.0 * 1024.0);
                 swprintf_s(szBuf, L"%.1f / %.1f MB", dlMB, totMB);
-            } else {
+            } else if (pT->downloadedBytes >= 1024ULL * 1024 * 1024) {
+                double dlGB = (double)pT->downloadedBytes / (1024.0 * 1024.0 * 1024.0);
+                swprintf_s(szBuf, pT->state == DownloadState::Completed ? L"%.2f GB" : L"%.2f GB / ?", dlGB);
+            } else if (pT->downloadedBytes > 0) {
                 double dlMB = (double)pT->downloadedBytes / (1024.0 * 1024.0);
-                swprintf_s(szBuf, L"%.1f MB", dlMB);
+                swprintf_s(szBuf, pT->state == DownloadState::Completed ? L"%.1f MB" : L"%.1f MB / ?", dlMB);
+            } else {
+                wcscpy_s(szBuf, L"--");
             }
             m_pCurrentRT->PushAxisAlignedClip(&sizeR, D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
             DrawTextLeft(szBuf, sizeR, m_pFormatRegular, m_pMutedTextBrush);
@@ -1095,7 +1114,9 @@ void Direct2DRenderer::RenderTaskListCard(
             D2D1_ROUNDED_RECT progTrackRR = D2D1::RoundedRect(progTrackR, progRadius, progRadius);
             m_pCurrentRT->FillRoundedRectangle(&progTrackRR, m_pProgressTrackBrush);
 
-            double frac = (pT->totalBytes > 0) ? ((double)pT->downloadedBytes / (double)pT->totalBytes) : 0.0;
+            double frac = (pT->state == DownloadState::Completed)
+                              ? 1.0
+                              : ((pT->totalBytes > 0) ? ((double)pT->downloadedBytes / (double)pT->totalBytes) : 0.0);
             if (frac > 1.0) frac = 1.0;
             if (frac < 0.0) frac = 0.0;
 
@@ -1560,21 +1581,27 @@ void Direct2DRenderer::RenderBottomBar(
     double totMB = (double)totalBytesAll / (1024.0 * 1024.0);
 
     bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
-    swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.0.1   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
-                                 (activeTasksCount == 1 ? L"⚡ Gety v1.0.1   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
-                                                          L"⚡ Gety v1.0.1   |   ● %d Active Tasks   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB"),
+    swprintf_s(statusBuf, isTr ? L"⚡ Gety v1.1.0   |   ● %d Aktif Görev   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                 (activeTasksCount == 1 ? L"⚡ Gety v1.1.0   |   ● %d Active Task   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB" :
+                                                          L"⚡ Gety v1.1.0   |   ● %d Active Tasks   |   ⬇ %.2f MB/s   |   💾 %.1f / %.1f MB"),
         activeTasksCount,
         speedMB,
         dlMB,
         totMB
     );
 
-    float rightWidth = 165.0f * m_dpiScale;
+    float rightWidth = 175.0f * m_dpiScale;
     D2D1_RECT_F leftTextR = D2D1::RectF(m_rcBottomBar.left + 12.0f * m_dpiScale, m_rcBottomBar.top, m_rcBottomBar.right - rightWidth - 8.0f * m_dpiScale, m_rcBottomBar.bottom);
     DrawTextLeft(statusBuf, leftTextR, m_pFormatSmall, m_pTextBrush);
 
     D2D1_RECT_F rightTextR = D2D1::RectF(m_rcBottomBar.right - rightWidth, m_rcBottomBar.top, m_rcBottomBar.right - 12.0f * m_dpiScale, m_rcBottomBar.bottom);
-    DrawTextRight(isTr ? L"🎛 Sınırsız Hız Modu" : L"🎛 Unlimited Speed", rightTextR, m_pFormatSemiBold, m_pCyanBrush);
+    const wchar_t* speedLabel = nullptr;
+    switch (Config::Instance().speedMode) {
+        case SpeedMode::ManualLimit: speedLabel = isTr ? L"🎛 Manuel Limit" : L"🎛 Manual Limit"; break;
+        case SpeedMode::Background:  speedLabel = isTr ? L"🎛 Arka Plan Modu" : L"🎛 Background Mode"; break;
+        default:                     speedLabel = isTr ? L"🎛 Sınırsız Hız Modu" : L"🎛 Unlimited Speed"; break;
+    }
+    DrawTextRight(speedLabel, rightTextR, m_pFormatSemiBold, m_pCyanBrush);
 }
 
 bool Direct2DRenderer::SaveSnapshot(

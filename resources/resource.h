@@ -49,6 +49,7 @@
 #define ID_DROPZONE_OPACITY75   265
 #define ID_DROPZONE_OPACITY100  266
 #define ID_DROPZONE_HIDE        267
+#define ID_TRAY_AUTOSTART       268
 
 // Language command IDs
 #define ID_LANG_BASE            500

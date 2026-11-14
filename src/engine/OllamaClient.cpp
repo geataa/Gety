@@ -227,22 +227,12 @@ OllamaFetchResult OllamaClient::FetchModelInfo(const OllamaModelSpec& spec,
         statusCb(L"Ollama kayıt sunucusuna bağlanılıyor: " + spec.displayName + L"...");
     }
 
-    // 1. Initialize WinHTTP session
-    HINTERNET hSession = WinHttpOpen(
-        L"Gety/1.0.1 (Windows; Win64; x64)",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0
-    );
+    // 1. Initialize WinHTTP session (TLS 1.2/1.3, HTTP/2/3, compressed JSON API responses)
+    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, true);
     if (!hSession) {
         result.errorMsg = L"WinHTTP başlatılamadı.";
         return result;
     }
-
-    // Enable TLS 1.2 and 1.3
-    DWORD secureProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-    WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &secureProtocols, sizeof(secureProtocols));
 
     // Connect to registry.ollama.ai
     HINTERNET hConnect = WinHttpConnect(hSession, L"registry.ollama.ai", INTERNET_DEFAULT_HTTPS_PORT, 0);

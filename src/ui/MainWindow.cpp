@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "Dialogs.h"
 #include "../core/Config.h"
+#include "../core/CliArgs.h"
 #include "../core/I18n.h"
 #include "../core/ClipboardWatcher.h"
 #include "../core/SpeedLimiter.h"
@@ -636,6 +637,40 @@ LRESULT MainWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
             return 0;
         }
 
+        case WM_COPYDATA: {
+            const COPYDATASTRUCT* cds = reinterpret_cast<const COPYDATASTRUCT*>(lParam);
+            if (cds && cds->dwData == 1 && cds->lpData && cds->cbData >= sizeof(wchar_t)) {
+                size_t wchars = cds->cbData / sizeof(wchar_t);
+                std::wstring payload(reinterpret_cast<const wchar_t*>(cds->lpData), wchars);
+                while (!payload.empty() && payload.back() == L'\0') {
+                    payload.pop_back();
+                }
+                CliLaunchOptions opts = ParseCliArgs(payload);
+                for (const auto& url : opts.urls) {
+                    DownloadManager::Instance().AddTask(url, Config::Instance().defaultSavePath, L"Genel", Config::Instance().defaultSplitParts, true);
+                }
+                if (!opts.urls.empty()) {
+                    Invalidate();
+                }
+            }
+            return TRUE;
+        }
+
+        case WM_QUERYENDSESSION: {
+            DownloadManager::Instance().SaveTasks();
+            Config::Instance().Save();
+            return TRUE;
+        }
+
+        case WM_ENDSESSION: {
+            if (wParam == TRUE) {
+                m_trayIcon.Remove();
+                DownloadManager::Instance().Shutdown();
+                Config::Instance().Save();
+            }
+            return 0;
+        }
+
         case WM_CLOSE: {
             if (Config::Instance().minimizeToTrayOnClose && !m_forceExit) {
                 ShowWindow(m_hwnd, SW_HIDE);
@@ -653,6 +688,7 @@ LRESULT MainWindow::HandleMessage(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lPa
         case WM_DESTROY: {
             m_trayIcon.Remove();
             DownloadManager::Instance().Shutdown();
+            Config::Instance().Save();
             PostQuitMessage(0);
             return 0;
         }
@@ -877,6 +913,13 @@ void MainWindow::HandleCommand(int id) {
             break;
         }
 
+        case ID_TRAY_AUTOSTART: {
+            Config::Instance().startWithWindows = !Config::Instance().startWithWindows;
+            Config::Instance().Save();
+            Invalidate();
+            break;
+        }
+
         case ID_TOOLS_OPTIONS:
             if (Dialogs::ShowOptionsDialog(m_hwnd)) {
                 ClipboardWatcher::Instance().SetEnabled(Config::Instance().monitorClipboard);
@@ -960,6 +1003,7 @@ void MainWindow::ShowTrayContextMenu() {
     AppendMenuW(hMenu, MF_STRING, ID_DOWNLOAD_PAUSE, LStr(StrId::MenuTaskPause));
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hMenu, MF_STRING | (Config::Instance().showDropZone ? MF_CHECKED : 0), ID_VIEW_DROPZONE, LStr(StrId::MenuViewDropZone));
+    AppendMenuW(hMenu, MF_STRING | (Config::Instance().startWithWindows ? MF_CHECKED : 0), ID_TRAY_AUTOSTART, LStr(StrId::DlgOptAutoStart));
     AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
     AppendMenuW(hMenu, MF_STRING, ID_FILE_EXIT, LStr(StrId::MenuFileExit));
 
@@ -1081,8 +1125,8 @@ bool MainWindow::SaveSnapshot(const std::wstring& filePath) {
             seg.id = i;
             seg.startByte = i * (t1.totalBytes / 10);
             seg.endByte = (i == 9) ? (t1.totalBytes - 1) : ((i + 1) * (t1.totalBytes / 10) - 1);
-            seg.currentOffset = seg.startByte + (seg.endByte - seg.startByte) * ((i < 6) ? 1.0 : 0.4);
-            seg.downloadedBytes = (seg.endByte - seg.startByte) * ((i < 6) ? 1.0 : 0.4);
+            seg.currentOffset = seg.startByte + static_cast<uint64_t>((seg.endByte - seg.startByte) * ((i < 6) ? 1.0 : 0.4));
+            seg.downloadedBytes = static_cast<uint64_t>((seg.endByte - seg.startByte) * ((i < 6) ? 1.0 : 0.4));
             seg.status = (i < 6) ? 3 : 2;
             seg.speedBps = (i < 6) ? 0.0 : 2.1 * 1024 * 1024;
             t1.segments.push_back(seg);

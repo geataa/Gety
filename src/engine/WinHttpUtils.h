@@ -22,6 +22,64 @@ struct UrlParts {
 
 class WinHttpUtils {
 public:
+    static constexpr const wchar_t* kBrowserUserAgent =
+        L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
+    static constexpr const wchar_t* kClientUserAgent =
+        L"Gety/1.1.0 (Windows; Win64; x64)";
+
+    /**
+     * Creates a hardened WinHTTP session configured with modern TLS (1.2/1.3),
+     * HTTP/2 + HTTP/3 protocol negotiation (when supported by Windows SDK/OS),
+     * automatic redirects, optional gzip/deflate decompression (do NOT enable for
+     * byte-range binary downloads), and sane network timeouts.
+     */
+    static HINTERNET CreateSession(const wchar_t* userAgent = kBrowserUserAgent,
+                                   bool enableHttp2And3 = true,
+                                   bool enableDecompression = false) {
+        HINTERNET hSession = WinHttpOpen(
+            userAgent ? userAgent : kClientUserAgent,
+            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+            WINHTTP_NO_PROXY_NAME,
+            WINHTTP_NO_PROXY_BYPASS,
+            0
+        );
+        if (!hSession) return nullptr;
+
+        DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+        WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
+
+        DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
+#ifdef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
+        protocols |= WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+#endif
+        WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+
+#ifdef WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL
+        if (enableHttp2And3) {
+            DWORD httpProtos = 0;
+#ifdef WINHTTP_PROTOCOL_FLAG_HTTP2
+            httpProtos |= WINHTTP_PROTOCOL_FLAG_HTTP2;
+#endif
+#ifdef WINHTTP_PROTOCOL_FLAG_HTTP3
+            httpProtos |= WINHTTP_PROTOCOL_FLAG_HTTP3;
+#endif
+            if (httpProtos != 0) {
+                WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &httpProtos, sizeof(httpProtos));
+            }
+        }
+#endif
+
+#ifdef WINHTTP_OPTION_DECOMPRESSION
+        if (enableDecompression) {
+            DWORD decomp = WINHTTP_DECOMPRESSION_FLAG_ALL;
+            WinHttpSetOption(hSession, WINHTTP_OPTION_DECOMPRESSION, &decomp, sizeof(decomp));
+        }
+#endif
+
+        WinHttpSetTimeouts(hSession, 15000, 15000, 20000, 20000);
+        return hSession;
+    }
+
     static bool ParseUrl(const std::wstring& url, UrlParts& parts) {
         URL_COMPONENTS urlComp = { 0 };
         urlComp.dwStructSize = sizeof(urlComp);

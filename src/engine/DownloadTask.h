@@ -43,8 +43,11 @@ public:
 
     bool IsMediaTask() const { return m_isMediaTask; }
     std::wstring GetMediaFormat() const { return m_mediaFormat; }
+    bool IsCustomFilenameSet() const { std::lock_guard<std::recursive_mutex> lock(m_mutex); return m_customFilenameSet; }
+    std::wstring GetResolvedUrl() const { std::lock_guard<std::recursive_mutex> lock(m_mutex); return m_resolvedUrl; }
 
-    void SetEventCallback(TaskEventCallback cb) { m_eventCb = cb; }
+    void SetEventCallback(TaskEventCallback cb) { m_eventCb = std::move(cb); }
+    void SetStateChangedCallback(TaskEventCallback cb) { m_stateChangedCb = std::move(cb); }
 
     void LoadState();
     void SaveState();
@@ -54,7 +57,17 @@ public:
                          DownloadState state,
                          const std::wstring& addedDate,
                          const std::wstring& completedDate,
-                         const std::wstring& category);
+                         const std::wstring& category,
+                         uint64_t totalBytes = 0,
+                         uint64_t downloadedBytes = 0,
+                         bool supportsResume = true,
+                         bool customFilenameSet = false,
+                         const std::wstring& resolvedUrl = L"",
+                         const std::wstring& errorMsg = L"",
+                         const std::vector<SegmentInfo>& segments = {});
+    void ReconcileWithDisk();
+    bool CheckScheduledRetryReady();
+    void ExecuteScheduledRetry();
     std::vector<TaskLogEntry> GetLogs() const;
     void RestoreLogs(const std::vector<TaskLogEntry>& logs);
 
@@ -62,12 +75,16 @@ private:
     void ProbeAndStart();
     void LaunchWorkers();
     void RunMediaDownload();
+    void ApplyMediaDestinationFilename(const std::wstring& cleanFilename, bool allowFormatSuffix);
+    void NotifyEvent();
+    void NotifyStateChanged();
     void OnSegmentProgress(int segId, uint64_t bytes);
     void OnSegmentFinished(int segId, bool success, const std::wstring& err);
     void CheckAllFinished();
     void AddLog(const std::wstring& msg, int level = 0);
     std::wstring GetTempFilePath() const;
     std::wstring GetStateFilePath() const;
+    uint64_t FindMediaPartialBytesLocked() const;
 
     mutable std::recursive_mutex m_mutex;
     DownloadTaskInfo m_info;
@@ -75,12 +92,15 @@ private:
     std::atomic<bool> m_pauseRequested = false;
     bool m_customFilenameSet = false;
     int m_retryCount = 0;
+    std::atomic<bool> m_waitingRetry = false;
+    std::chrono::steady_clock::time_point m_retryDueTime{};
 
     bool m_isMediaTask = false;
     std::wstring m_mediaFormat;
     HANDLE m_hMediaProcess = NULL;
     std::thread m_mediaThread;
     std::atomic<bool> m_isMediaCancelled = false;
+    std::wstring m_activeMediaPartPath;
     
     std::wstring m_resolvedUrl;
     HANDLE m_hFile = INVALID_HANDLE_VALUE;
@@ -99,6 +119,7 @@ private:
     mutable double m_speed3sBps = 0.0;
 
     TaskEventCallback m_eventCb;
+    TaskEventCallback m_stateChangedCb;
 };
 
 } // namespace Gety

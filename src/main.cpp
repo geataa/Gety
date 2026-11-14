@@ -5,6 +5,7 @@
 #include "ui/MainWindow.h"
 #include "ui/Dialogs.h"
 #include "core/Config.h"
+#include "core/CliArgs.h"
 #include "engine/DownloadManager.h"
 #include "resource.h"
 
@@ -153,20 +154,30 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR pCmd
         return saved ? 0 : 1;
     }
 
+    // Parse CLI flags separately from URLs so "--minimized" / "--autostart" / "--tray" never become tasks
+    Gety::CliLaunchOptions cliOpts = Gety::ParseCliArgs(pCmdLine ? pCmdLine : L"");
+    if (!cliOpts.startMinimized) {
+        cliOpts.startMinimized = (cmdLine.find(L"--minimized") != std::wstring::npos ||
+                                  cmdLine.find(L"--autostart") != std::wstring::npos ||
+                                  cmdLine.find(L"--tray") != std::wstring::npos);
+    }
+
     // Single instance mutex
     HANDLE hMutex = CreateMutexW(NULL, TRUE, L"SkySoft_Gety_SingleInstance_Mutex");
     if (GetLastError() == ERROR_ALREADY_EXISTS) {
         HWND hExisting = FindWindowW(L"GetyMainWindow", NULL);
         if (hExisting) {
-            ShowWindow(hExisting, SW_RESTORE);
-            SetForegroundWindow(hExisting);
+            if (!cliOpts.startMinimized || !cliOpts.urls.empty()) {
+                ShowWindow(hExisting, SW_RESTORE);
+                SetForegroundWindow(hExisting);
+            }
 
-            // If command line provided an URL, forward it via WM_COPYDATA
-            if (pCmdLine && wcslen(pCmdLine) > 0) {
+            // Forward actual command-line URLs via WM_COPYDATA (ignore CLI flags)
+            for (const auto& u : cliOpts.urls) {
                 COPYDATASTRUCT cds = { 0 };
                 cds.dwData = 1;
-                cds.cbData = (DWORD)((wcslen(pCmdLine) + 1) * sizeof(wchar_t));
-                cds.lpData = (PVOID)pCmdLine;
+                cds.cbData = (DWORD)((u.length() + 1) * sizeof(wchar_t));
+                cds.lpData = (PVOID)u.c_str();
                 SendMessageW(hExisting, WM_COPYDATA, 0, (LPARAM)&cds);
             }
         }
@@ -175,24 +186,13 @@ int WINAPI wWinMain(HINSTANCE hInstance, HINSTANCE /*hPrevInstance*/, PWSTR pCmd
         return 0;
     }
 
-    // Check if started minimized (e.g. from Windows autostart)
-    bool startMinimized = (cmdLine.find(L"--minimized") != std::wstring::npos ||
-                           cmdLine.find(L"--autostart") != std::wstring::npos ||
-                           cmdLine.find(L"--tray") != std::wstring::npos);
-    int initialShow = startMinimized ? SW_HIDE : nCmdShow;
+    int initialShow = cliOpts.startMinimized ? SW_HIDE : nCmdShow;
 
     // Create and run Main Window
     if (Gety::MainWindow::Instance().Create(hInstance, initialShow)) {
-        // If command-line URL given, add it
-        if (pCmdLine && wcslen(pCmdLine) > 0) {
-            std::wstring cmdStr = pCmdLine;
-            // Strip quotes if any
-            if (cmdStr.front() == L'"' && cmdStr.back() == L'"') {
-                cmdStr = cmdStr.substr(1, cmdStr.length() - 2);
-            }
-            if (!cmdStr.empty()) {
-                Gety::DownloadManager::Instance().AddTask(cmdStr, Gety::Config::Instance().defaultSavePath, L"Genel", Gety::Config::Instance().defaultSplitParts, true);
-            }
+        // Add only validated URLs passed via command line
+        for (const auto& u : cliOpts.urls) {
+            Gety::DownloadManager::Instance().AddTask(u, Gety::Config::Instance().defaultSavePath, L"Genel", Gety::Config::Instance().defaultSplitParts, true);
         }
 
         Gety::MainWindow::Instance().RunMessageLoop();

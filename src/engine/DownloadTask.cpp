@@ -14,11 +14,54 @@
 
 namespace Gety {
 
+static bool GetDiskFileSize64(const std::wstring& path, uint64_t& outSize) {
+    outSize = 0;
+    if (path.empty()) return false;
+    WIN32_FILE_ATTRIBUTE_DATA fad;
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &fad)) {
+        return false;
+    }
+    if (fad.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
+        return false;
+    }
+    LARGE_INTEGER size;
+    size.LowPart = fad.nFileSizeLow;
+    size.HighPart = fad.nFileSizeHigh;
+    outSize = (size.QuadPart >= 0) ? static_cast<uint64_t>(size.QuadPart) : 0ULL;
+    return true;
+}
+
+static std::wstring StripMediaFormatSuffix(const std::wstring& filename) {
+    // yt-dlp intermediate streams look like "Video Title.f137.mp4" or "Video Title.f140.m4a"
+    size_t lastDot = filename.find_last_of(L'.');
+    if (lastDot == std::wstring::npos || lastDot == 0) return filename;
+    size_t prevDot = filename.find_last_of(L'.', lastDot - 1);
+    if (prevDot == std::wstring::npos) return filename;
+    std::wstring middle = filename.substr(prevDot + 1, lastDot - prevDot - 1);
+    if (middle.size() >= 2 && (middle[0] == L'f' || middle[0] == L'F')) {
+        bool allDigits = true;
+        for (size_t i = 1; i < middle.size(); ++i) {
+            if (middle[i] < L'0' || middle[i] > L'9') {
+                allDigits = false;
+                break;
+            }
+        }
+        if (allDigits) {
+            return filename.substr(0, prevDot) + filename.substr(lastDot);
+        }
+    }
+    return filename;
+}
+
 static uint64_t ParseMediaBytes(const std::string& str) {
-    if (str.empty() || str == "NA") return 0;
+    std::string clean = str;
+    while (!clean.empty() && (clean.front() == ' ' || clean.front() == '\t' || clean.front() == '~')) {
+        clean.erase(clean.begin());
+    }
+    if (clean.empty() || clean == "NA" || clean == "N/A") return 0;
     double val = 0.0;
     char unit[16] = { 0 };
-    if (sscanf_s(str.c_str(), "%lf%15s", &val, unit, (unsigned)_countof(unit)) >= 1) {
+    if (sscanf_s(clean.c_str(), "%lf%15s", &val, unit, (unsigned)_countof(unit)) >= 1 && val > 0.0) {
         std::string u = unit;
         std::transform(u.begin(), u.end(), u.begin(), ::toupper);
         if (u.find("G") != std::string::npos) return static_cast<uint64_t>(val * 1024.0 * 1024.0 * 1024.0);
@@ -133,9 +176,8 @@ bool DownloadTask::UpdateUrl(const std::wstring& newUrl) {
     AddLog(L"İndirme bağlantısı güncellendi: " + trimmed, 1);
     SaveState();
 
-    if (m_eventCb) {
-        m_eventCb(m_info.id);
-    }
+    NotifyEvent();
+    NotifyStateChanged();
     return true;
 }
 
@@ -190,20 +232,36 @@ bool DownloadTask::Rename(const std::wstring& newFilename) {
         Start();
     }
 
-    if (m_eventCb) {
-        m_eventCb(m_info.id);
-    }
+    NotifyEvent();
+    NotifyStateChanged();
     return true;
 }
 
 DownloadTask::~DownloadTask() {
     Stop();
-    if (m_probeThread.joinable()) {
-        m_probeThread.detach();
+    std::thread probeToJoin;
+    std::thread mediaToJoin;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        probeToJoin.swap(m_probeThread);
+        mediaToJoin.swap(m_mediaThread);
     }
-    if (m_mediaThread.joinable()) {
-        m_mediaThread.detach();
+    if (probeToJoin.joinable()) {
+        if (probeToJoin.get_id() != std::this_thread::get_id()) probeToJoin.join();
+        else probeToJoin.detach();
     }
+    if (mediaToJoin.joinable()) {
+        if (mediaToJoin.get_id() != std::this_thread::get_id()) mediaToJoin.join();
+        else mediaToJoin.detach();
+    }
+}
+
+void DownloadTask::NotifyEvent() {
+    if (m_eventCb) m_eventCb(m_info.id);
+}
+
+void DownloadTask::NotifyStateChanged() {
+    if (m_stateChangedCb) m_stateChangedCb(m_info.id);
 }
 
 void DownloadTask::SetCategory(const std::wstring& cat) {
@@ -303,6 +361,16 @@ DownloadTaskInfo DownloadTask::GetSnapshot() const {
         m_speedSamples.clear();
         m_speed3sBps = 0.0;
         snap.currentSpeedBps = 0.0;
+        if (!m_isMediaTask && snap.downloadedBytes == 0 && !snap.segments.empty()) {
+            uint64_t sum = 0;
+            for (const auto& seg : snap.segments) {
+                sum += seg.downloadedBytes;
+            }
+            snap.downloadedBytes = sum;
+        }
+        if (snap.state == DownloadState::Completed && snap.totalBytes > 0 && snap.downloadedBytes < snap.totalBytes) {
+            snap.downloadedBytes = snap.totalBytes;
+        }
     }
     return snap;
 }
@@ -317,33 +385,57 @@ void DownloadTask::Start() {
     }
 
     if (m_isMediaTask) {
+        std::thread prevMedia;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            prevMedia.swap(m_mediaThread);
+        }
+        if (prevMedia.joinable() && prevMedia.get_id() != std::this_thread::get_id()) {
+            prevMedia.join();
+        }
+
         m_retryCount = 0;
+        m_waitingRetry = false;
         m_isFinishing = false;
         m_isMediaCancelled = false;
         m_pauseRequested = false;
         m_state = DownloadState::Connecting;
+        m_info.state = DownloadState::Connecting;
         AddLog(L"Video indirme işlemi başlatılıyor...", 0);
 
-        if (m_mediaThread.joinable() && m_mediaThread.get_id() != std::this_thread::get_id()) {
-            m_mediaThread.join();
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            m_mediaThread = std::thread(&DownloadTask::RunMediaDownload, this);
         }
-        m_mediaThread = std::thread(&DownloadTask::RunMediaDownload, this);
+        NotifyStateChanged();
         return;
+    }
+
+    std::thread prevProbe;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        prevProbe.swap(m_probeThread);
+    }
+    if (prevProbe.joinable() && prevProbe.get_id() != std::this_thread::get_id()) {
+        prevProbe.join();
     }
 
     m_pauseRequested = false;
     m_retryCount = 0;
+    m_waitingRetry = false;
     m_isFinishing = false;
     m_state = DownloadState::Connecting;
+    m_info.state = DownloadState::Connecting;
     AddLog(L"İndirme başlatılıyor...", 0);
 
-    // Try loading existing state file first
+    // Clean up legacy sidecar state file if present
     LoadState();
 
-    if (m_probeThread.joinable()) {
-        m_probeThread.join();
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_probeThread = std::thread(&DownloadTask::ProbeAndStart, this);
     }
-    m_probeThread = std::thread(&DownloadTask::ProbeAndStart, this);
+    NotifyStateChanged();
 }
 
 void DownloadTask::ProbeAndStart() {
@@ -379,27 +471,17 @@ void DownloadTask::ProbeAndStart() {
                 return;
             }
 
-            HINTERNET hSession = WinHttpOpen(L"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36",
-                                            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-                                            WINHTTP_NO_PROXY_NAME,
-                                            WINHTTP_NO_PROXY_BYPASS, 0);
+            HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kBrowserUserAgent, true, false);
             if (!hSession) {
                 m_state = DownloadState::Failed;
                 m_info.errorMsg = L"WinHttp başlatılamadı";
                 AddLog(m_info.errorMsg, 3);
                 m_isProbing = false;
-                if (m_eventCb) m_eventCb(m_info.id);
+                NotifyEvent();
+                NotifyStateChanged();
                 return;
             }
             m_hProbeSession = hSession;
-
-            DWORD redirectPolicy = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
-            WinHttpSetOption(hSession, WINHTTP_OPTION_REDIRECT_POLICY, &redirectPolicy, sizeof(redirectPolicy));
-
-            DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-            WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
-
-            WinHttpSetTimeouts(hSession, 15000, 15000, 20000, 20000);
 
             HINTERNET hConnect = WinHttpConnect(hSession, parts.host.c_str(), parts.port, 0);
             if (!hConnect) {
@@ -718,6 +800,31 @@ void DownloadTask::LaunchWorkers() {
     std::vector<std::unique_ptr<SegmentWorker>> workers;
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (!m_info.supportsResume) {
+            m_info.downloadedBytes = 0;
+            for (auto& seg : m_info.segments) {
+                seg.downloadedBytes = 0;
+                seg.currentOffset = seg.startByte;
+                seg.status = 0;
+            }
+        } else {
+            uint64_t sum = 0;
+            for (auto& seg : m_info.segments) {
+                uint64_t segLen = seg.totalBytes();
+                if (segLen > 0 && seg.downloadedBytes > segLen) {
+                    seg.downloadedBytes = segLen;
+                }
+                seg.currentOffset = seg.startByte + seg.downloadedBytes;
+                if (segLen > 0 && seg.downloadedBytes >= segLen) {
+                    seg.status = 3; // done
+                } else if (seg.status == 4 || seg.status == 2) {
+                    seg.status = 0; // reset interrupted/failed segment for retry
+                }
+                sum += seg.downloadedBytes;
+            }
+            m_info.downloadedBytes = sum;
+        }
+
         for (const auto& seg : m_info.segments) {
             auto worker = std::make_unique<SegmentWorker>(
                 seg.id,
@@ -760,6 +867,11 @@ void DownloadTask::OnSegmentProgress(int segId, uint64_t bytes) {
     if (segId >= 0 && segId < (int)m_info.segments.size()) {
         m_info.segments[segId].downloadedBytes = bytes;
         m_info.segments[segId].currentOffset = m_info.segments[segId].startByte + bytes;
+        uint64_t totalDown = 0;
+        for (const auto& s : m_info.segments) {
+            totalDown += s.downloadedBytes;
+        }
+        m_info.downloadedBytes = totalDown;
     }
 }
 
@@ -822,26 +934,23 @@ void DownloadTask::CheckAllFinished() {
                 AddLog(L"Parça hatası oluştu, yeniden deneniyor (" +
                        std::to_wstring(m_retryCount) + L"/" + std::to_wstring(maxRetries) + L")...", 2);
                 m_state = DownloadState::Connecting;
-                if (m_eventCb) m_eventCb(m_info.id);
-
-                std::thread([this]() {
-                    std::this_thread::sleep_for(std::chrono::milliseconds(2000));
-                    if (m_state.load() == DownloadState::Connecting && !m_pauseRequested.load()) {
-                        ProbeAndStart();
-                    }
-                }).detach();
+                m_retryDueTime = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+                m_waitingRetry = true;
+                NotifyEvent();
                 return;
             }
 
             m_state = DownloadState::Failed;
             m_info.errorMsg = L"İndirme başarısız oldu - parçalar hata verdi (Yeniden deneme sınırı aşıldı)";
             AddLog(m_info.errorMsg, 3);
-            if (m_eventCb) m_eventCb(m_info.id);
+            NotifyEvent();
+            NotifyStateChanged();
         }
     }
 
     if (allDone) {
         m_retryCount = 0;
+        m_waitingRetry = false;
         bool expected = false;
         if (!m_isFinishing.compare_exchange_strong(expected, true)) {
             return;
@@ -854,23 +963,47 @@ void DownloadTask::CheckAllFinished() {
             m_hFile = INVALID_HANDLE_VALUE;
         }
 
-        // Move .gety to final filename
+        // Move .gety to final filename atomically/safely
         std::wstring tempFile = GetTempFilePath();
         std::wstring finalFile = m_info.fullPath;
 
-        // If target exists, delete or replace
-        DeleteFileW(finalFile.c_str());
-        if (MoveFileW(tempFile.c_str(), finalFile.c_str())) {
-            // Remove state file
-            DeleteFileW(GetStateFilePath().c_str());
+        if (!MoveFileExW(tempFile.c_str(), finalFile.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            DWORD moveErr = GetLastError();
+            if (moveErr == ERROR_NOT_SAME_DEVICE || !MoveFileExW(tempFile.c_str(), finalFile.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_COPY_ALLOWED)) {
+                m_isFinishing = false;
+                m_state = DownloadState::Failed;
+                m_info.errorMsg = L"İndirilen geçici dosya hedefe taşınamadı (Hata: " + std::to_wstring(GetLastError()) + L")";
+                AddLog(m_info.errorMsg, 3);
+                NotifyEvent();
+                NotifyStateChanged();
+                return;
+            }
         }
+        DeleteFileW(GetStateFilePath().c_str());
+
+        uint64_t finalDiskSize = 0;
+        GetDiskFileSize64(finalFile, finalDiskSize);
 
         {
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_state = DownloadState::Completed;
+            m_info.state = DownloadState::Completed;
             m_info.completedDate = GetCurrentDateString();
-            m_info.downloadedBytes = m_info.totalBytes;
+            if (m_info.totalBytes == 0 && finalDiskSize > 0) {
+                m_info.totalBytes = finalDiskSize;
+            }
+            m_info.downloadedBytes = (m_info.totalBytes > 0) ? m_info.totalBytes : finalDiskSize;
             m_info.currentSpeedBps = 0.0;
+            m_info.errorMsg.clear();
+            for (auto& seg : m_info.segments) {
+                uint64_t segTotal = seg.totalBytes();
+                if (segTotal > 0) {
+                    seg.downloadedBytes = segTotal;
+                    seg.currentOffset = seg.endByte + 1;
+                }
+                seg.speedBps = 0.0;
+                seg.status = 3;
+            }
         }
 
         AddLog(L"Tebrikler! İndirme başarıyla tamamlandı: " + m_info.filename, 1);
@@ -882,7 +1015,39 @@ void DownloadTask::CheckAllFinished() {
 
         SaveState();
 
-        if (m_eventCb) m_eventCb(m_info.id);
+        NotifyEvent();
+        NotifyStateChanged();
+    }
+}
+
+bool DownloadTask::CheckScheduledRetryReady() {
+    if (!m_waitingRetry.load()) return false;
+    if (m_pauseRequested.load() || m_state.load() != DownloadState::Connecting) {
+        m_waitingRetry = false;
+        return false;
+    }
+    return std::chrono::steady_clock::now() >= m_retryDueTime;
+}
+
+void DownloadTask::ExecuteScheduledRetry() {
+    bool expected = true;
+    if (!m_waitingRetry.compare_exchange_strong(expected, false)) return;
+    if (m_pauseRequested.load() || m_state.load() != DownloadState::Connecting) return;
+
+    std::thread prevProbe;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        prevProbe.swap(m_probeThread);
+    }
+    if (prevProbe.joinable() && prevProbe.get_id() != std::this_thread::get_id()) {
+        prevProbe.join();
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (!m_pauseRequested.load() && m_state.load() == DownloadState::Connecting) {
+            m_probeThread = std::thread(&DownloadTask::ProbeAndStart, this);
+        }
     }
 }
 
@@ -893,62 +1058,109 @@ void DownloadTask::Pause() {
     }
 
     m_pauseRequested = true;
+    m_waitingRetry = false;
 
     if (cur == DownloadState::Queued) {
-        m_state = DownloadState::Paused;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            m_state = DownloadState::Paused;
+            m_info.state = DownloadState::Paused;
+        }
         AddLog(L"Kuyruktaki indirme duraklatıldı.", 2);
-        if (m_eventCb) m_eventCb(m_info.id);
+        NotifyEvent();
+        NotifyStateChanged();
         return;
     }
 
     m_state = DownloadState::Paused;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        m_info.state = DownloadState::Paused;
+    }
 
     if (m_isMediaTask) {
         AddLog(L"Video indirme duraklatılıyor...", 2);
         m_isMediaCancelled = true;
         HANDLE hProc = NULL;
+        std::thread mediaToJoin;
         {
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             hProc = m_hMediaProcess;
+            if (m_mediaThread.joinable() && m_mediaThread.get_id() != std::this_thread::get_id()) {
+                mediaToJoin.swap(m_mediaThread);
+            }
         }
         if (hProc != NULL) {
             TerminateProcess(hProc, 0);
         }
+        if (mediaToJoin.joinable()) {
+            mediaToJoin.join();
+        }
         {
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_info.currentSpeedBps = 0.0;
+            uint64_t partBytes = FindMediaPartialBytesLocked();
+            if (partBytes > m_info.downloadedBytes) {
+                m_info.downloadedBytes = partBytes;
+                if (!m_info.segments.empty()) {
+                    m_info.segments[0].downloadedBytes = partBytes;
+                    m_info.segments[0].speedBps = 0.0;
+                    m_info.segments[0].status = 1;
+                }
+            }
         }
         AddLog(L"Video indirme duraklatıldı.", 2);
-        if (m_eventCb) m_eventCb(m_info.id);
+        NotifyEvent();
+        NotifyStateChanged();
         return;
     }
 
-    // Cancel probing if active
+    // Cancel probing if active and join probe thread safely
     HINTERNET prReq = m_hProbeRequest.exchange(nullptr);
     if (prReq) WinHttpCloseHandle(prReq);
     HINTERNET prSess = m_hProbeSession.exchange(nullptr);
     if (prSess) WinHttpCloseHandle(prSess);
+
+    std::thread probeToJoin;
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (m_probeThread.joinable() && m_probeThread.get_id() != std::this_thread::get_id()) {
+            probeToJoin.swap(m_probeThread);
+        }
+    }
+    if (probeToJoin.joinable()) {
+        probeToJoin.join();
+    }
 
     AddLog(L"İndirme duraklatılıyor...", 2);
 
     std::vector<std::unique_ptr<SegmentWorker>> workersToStop;
     {
         std::lock_guard<std::recursive_mutex> lock(m_mutex);
-        m_info.downloadedBytes = 0;
-        for (size_t i = 0; i < m_workers.size() && i < m_info.segments.size(); ++i) {
-            if (m_workers[i]) {
-                SegmentInfo si = m_workers[i]->GetInfo();
-                m_info.segments[i] = si;
-                m_info.downloadedBytes += si.downloadedBytes;
-            }
-        }
-        m_info.currentSpeedBps = 0.0;
         workersToStop = std::move(m_workers);
         m_workers.clear();
     }
 
+    // Stop workers FIRST so final written byte counts are accurate
     for (auto& w : workersToStop) {
         if (w) w->Stop();
+    }
+
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (!workersToStop.empty()) {
+            m_info.downloadedBytes = 0;
+            for (size_t i = 0; i < workersToStop.size() && i < m_info.segments.size(); ++i) {
+                if (workersToStop[i]) {
+                    SegmentInfo si = workersToStop[i]->GetInfo();
+                    si.speedBps = 0.0;
+                    if (si.status == 2) si.status = 1; // paused
+                    m_info.segments[i] = si;
+                    m_info.downloadedBytes += si.downloadedBytes;
+                }
+            }
+        }
+        m_info.currentSpeedBps = 0.0;
     }
 
     if (m_hFile != INVALID_HANDLE_VALUE) {
@@ -960,7 +1172,8 @@ void DownloadTask::Pause() {
     SaveState();
     AddLog(L"İndirme duraklatıldı.", 2);
 
-    if (m_eventCb) m_eventCb(m_info.id);
+    NotifyEvent();
+    NotifyStateChanged();
 }
 
 void DownloadTask::Stop() {
@@ -976,6 +1189,31 @@ void DownloadTask::Stop() {
         }
     }
     Pause();
+}
+
+void DownloadTask::ApplyMediaDestinationFilename(const std::wstring& cleanFilename, bool allowFormatSuffix) {
+    if (cleanFilename.empty()) return;
+    std::wstring effectiveName = allowFormatSuffix ? cleanFilename : StripMediaFormatSuffix(cleanFilename);
+    {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
+        if (m_customFilenameSet) {
+            size_t extDot = effectiveName.find_last_of(L'.');
+            std::wstring ext = (extDot != std::wstring::npos) ? effectiveName.substr(extDot) : L"";
+            std::wstring baseStem = m_info.filename;
+            size_t stemDot = baseStem.find_last_of(L'.');
+            if (stemDot != std::wstring::npos && stemDot > 0) {
+                baseStem = baseStem.substr(0, stemDot);
+            }
+            if (!ext.empty()) {
+                m_info.filename = baseStem + ext;
+            }
+        } else {
+            m_info.filename = effectiveName;
+        }
+        m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
+        m_activeMediaPartPath = m_info.saveDirectory + L"\\" + cleanFilename + L".part";
+    }
+    NotifyStateChanged();
 }
 
 void DownloadTask::RunMediaDownload() {
@@ -1124,6 +1362,16 @@ void DownloadTask::RunMediaDownload() {
                             uint64_t curTotal = ParseMediaBytes(pTotal);
                             double curSpeed = ParseMediaSpeed(pSpeed);
 
+                            if (curDown == 0 && curTotal > 0) {
+                                size_t pctPos = pPct.find('%');
+                                std::string pctStr = (pctPos != std::string::npos) ? pPct.substr(0, pctPos) : pPct;
+                                while (!pctStr.empty() && pctStr.front() == ' ') pctStr.erase(pctStr.begin());
+                                double pct = std::atof(pctStr.c_str());
+                                if (pct > 0.0) {
+                                    curDown = static_cast<uint64_t>((pct / 100.0) * curTotal);
+                                }
+                            }
+
                             std::lock_guard<std::recursive_mutex> lock(m_mutex);
                             if (curDown > 0) m_info.downloadedBytes = curDown;
                             if (curTotal > 0) m_info.totalBytes = curTotal;
@@ -1149,8 +1397,6 @@ void DownloadTask::RunMediaDownload() {
                         if (pctPos != std::string::npos && ofPos != std::string::npos) {
                             std::string totalStr = (atPos != std::string::npos) ? lineAcc.substr(ofPos + 4, atPos - (ofPos + 4)) : "";
                             std::string speedStr = (atPos != std::string::npos && etaPos != std::string::npos) ? lineAcc.substr(atPos + 4, etaPos - (atPos + 4)) : "";
-                            size_t tilde = totalStr.find('~');
-                            if (tilde != std::string::npos) totalStr.erase(tilde, 1);
 
                             uint64_t curTotal = ParseMediaBytes(totalStr);
                             double curSpeed = ParseMediaSpeed(speedStr);
@@ -1178,7 +1424,7 @@ void DownloadTask::RunMediaDownload() {
                             m_info.segments[0].speedBps = m_info.currentSpeedBps;
                             m_info.segments[0].status = 2;
                         }
-                    } else if (lineAcc.find("Destination: ") != std::string::npos) {
+                    } else if (lineAcc.find("Destination: ") != std::string::npos && lineAcc.find("[ExtractAudio]") == std::string::npos) {
                         size_t pos = lineAcc.find("Destination: ") + 13;
                         std::string destStr = lineAcc.substr(pos);
                         size_t first = destStr.find_first_not_of(" \t\r\n\"'");
@@ -1189,26 +1435,19 @@ void DownloadTask::RunMediaDownload() {
                         std::wstring wDest = MediaExtractor::Utf8ToWide(destStr);
                         size_t slash = wDest.find_last_of(L"/\\");
                         std::wstring cleanFilename = (slash != std::wstring::npos) ? wDest.substr(slash + 1) : wDest;
-                        {
-                            std::lock_guard<std::recursive_mutex> lock(m_mutex);
-                            if (m_customFilenameSet) {
-                                size_t extDot = cleanFilename.find_last_of(L'.');
-                                std::wstring ext = (extDot != std::wstring::npos) ? cleanFilename.substr(extDot) : L"";
-                                std::wstring baseStem = m_info.filename;
-                                size_t stemDot = baseStem.find_last_of(L'.');
-                                if (stemDot != std::wstring::npos && stemDot > 0) {
-                                    baseStem = baseStem.substr(0, stemDot);
-                                }
-                                if (!ext.empty()) {
-                                    m_info.filename = baseStem + ext;
-                                }
-                                m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                            } else {
-                                m_info.filename = cleanFilename;
-                                m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                            }
-                        }
+                        ApplyMediaDestinationFilename(cleanFilename, false);
                         AddLog(L"Hedef dosya belirlendi: " + m_info.filename, 0);
+                    } else if (lineAcc.find(" has already been downloaded") != std::string::npos) {
+                        size_t dlPos = lineAcc.find("[download] ");
+                        size_t endPos = lineAcc.find(" has already been downloaded");
+                        if (dlPos != std::string::npos && endPos != std::string::npos && endPos > dlPos + 11) {
+                            std::string destStr = lineAcc.substr(dlPos + 11, endPos - (dlPos + 11));
+                            std::wstring wDest = MediaExtractor::Utf8ToWide(destStr);
+                            size_t slash = wDest.find_last_of(L"/\\");
+                            std::wstring cleanFilename = (slash != std::wstring::npos) ? wDest.substr(slash + 1) : wDest;
+                            ApplyMediaDestinationFilename(cleanFilename, true);
+                            AddLog(L"Dosya zaten indirilmiş: " + m_info.filename, 1);
+                        }
                     } else if (lineAcc.find("[Merger] Merging formats into \"") != std::string::npos) {
                         size_t start = lineAcc.find("[Merger] Merging formats into \"") + 31;
                         size_t end = lineAcc.find('"', start);
@@ -1217,25 +1456,7 @@ void DownloadTask::RunMediaDownload() {
                             std::wstring wDest = MediaExtractor::Utf8ToWide(destStr);
                             size_t slash = wDest.find_last_of(L"/\\");
                             std::wstring cleanFilename = (slash != std::wstring::npos) ? wDest.substr(slash + 1) : wDest;
-                            {
-                                std::lock_guard<std::recursive_mutex> lock(m_mutex);
-                                if (m_customFilenameSet) {
-                                    size_t extDot = cleanFilename.find_last_of(L'.');
-                                    std::wstring ext = (extDot != std::wstring::npos) ? cleanFilename.substr(extDot) : L"";
-                                    std::wstring baseStem = m_info.filename;
-                                    size_t stemDot = baseStem.find_last_of(L'.');
-                                    if (stemDot != std::wstring::npos && stemDot > 0) {
-                                        baseStem = baseStem.substr(0, stemDot);
-                                    }
-                                    if (!ext.empty()) {
-                                        m_info.filename = baseStem + ext;
-                                    }
-                                    m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                                } else {
-                                    m_info.filename = cleanFilename;
-                                    m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                                }
-                            }
+                            ApplyMediaDestinationFilename(cleanFilename, true);
                             AddLog(L"Video ve ses birleştirildi: " + m_info.filename, 1);
                         }
                     } else if (lineAcc.find("[ExtractAudio] Destination: ") != std::string::npos) {
@@ -1249,25 +1470,7 @@ void DownloadTask::RunMediaDownload() {
                         std::wstring wDest = MediaExtractor::Utf8ToWide(destStr);
                         size_t slash = wDest.find_last_of(L"/\\");
                         std::wstring cleanFilename = (slash != std::wstring::npos) ? wDest.substr(slash + 1) : wDest;
-                        {
-                            std::lock_guard<std::recursive_mutex> lock(m_mutex);
-                            if (m_customFilenameSet) {
-                                size_t extDot = cleanFilename.find_last_of(L'.');
-                                std::wstring ext = (extDot != std::wstring::npos) ? cleanFilename.substr(extDot) : L"";
-                                std::wstring baseStem = m_info.filename;
-                                size_t stemDot = baseStem.find_last_of(L'.');
-                                if (stemDot != std::wstring::npos && stemDot > 0) {
-                                    baseStem = baseStem.substr(0, stemDot);
-                                }
-                                if (!ext.empty()) {
-                                    m_info.filename = baseStem + ext;
-                                }
-                                m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                            } else {
-                                m_info.filename = cleanFilename;
-                                m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
-                            }
-                        }
+                        ApplyMediaDestinationFilename(cleanFilename, true);
                         AddLog(L"Ses dosyası oluşturuldu: " + m_info.filename, 1);
                     } else if (lineAcc.rfind("ERROR:", 0) == 0 || lineAcc.rfind("WARNING:", 0) == 0) {
                         AddLog(MediaExtractor::Utf8ToWide(lineAcc), (lineAcc[0] == 'E') ? 3 : 2);
@@ -1293,25 +1496,60 @@ void DownloadTask::RunMediaDownload() {
     }
 
     if (m_isMediaCancelled.load()) {
-        m_state = DownloadState::Paused;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            m_state = DownloadState::Paused;
+            m_info.state = DownloadState::Paused;
+            m_info.currentSpeedBps = 0.0;
+            uint64_t partBytes = FindMediaPartialBytesLocked();
+            if (partBytes > m_info.downloadedBytes) {
+                m_info.downloadedBytes = partBytes;
+                if (!m_info.segments.empty()) {
+                    m_info.segments[0].downloadedBytes = partBytes;
+                    m_info.segments[0].status = 1;
+                }
+            }
+        }
         AddLog(L"Video indirme kullanıcı tarafından duraklatıldı.", 2);
-        if (m_eventCb) m_eventCb(m_info.id);
+        NotifyEvent();
+        NotifyStateChanged();
         return;
     }
 
     if (exitCode == 0) {
+        std::wstring finalPath;
+        {
+            std::lock_guard<std::recursive_mutex> lock(m_mutex);
+            finalPath = m_info.fullPath;
+        }
+        uint64_t diskSize = 0;
+        if (GetDiskFileSize64(finalPath, diskSize) && diskSize > 0) {
+            // Got exact final size on disk
+        }
+
         {
             std::lock_guard<std::recursive_mutex> lock(m_mutex);
             m_state = DownloadState::Completed;
+            m_info.state = DownloadState::Completed;
             m_info.completedDate = GetCurrentDateString();
-            if (m_info.totalBytes > 0) m_info.downloadedBytes = m_info.totalBytes;
+            if (diskSize > 0) {
+                m_info.totalBytes = diskSize;
+                m_info.downloadedBytes = diskSize;
+            } else if (m_info.totalBytes > 0) {
+                m_info.downloadedBytes = m_info.totalBytes;
+            } else if (m_info.downloadedBytes > 0) {
+                m_info.totalBytes = m_info.downloadedBytes;
+            }
             m_info.currentSpeedBps = 0.0;
-            if (m_info.category.empty() || m_info.category == L"Genel") {
+            m_info.errorMsg.clear();
+            if (m_info.category.empty() || m_info.category == L"Genel" || m_info.category == L"General") {
                 m_info.category = (m_mediaFormat == L"mp3" || m_mediaFormat == L"m4a") ? LStr(StrId::CatMusic) : LStr(StrId::CatVideo);
             }
             if (!m_info.segments.empty()) {
                 m_info.segments[0].status = 3; // done
+                m_info.segments[0].endByte = (m_info.totalBytes > 0) ? m_info.totalBytes - 1 : 0;
                 m_info.segments[0].downloadedBytes = m_info.totalBytes;
+                m_info.segments[0].speedBps = 0.0;
             }
         }
         AddLog(L"Tebrikler! Video indirme başarıyla tamamlandı: " + m_info.filename, 1);
@@ -1320,12 +1558,20 @@ void DownloadTask::RunMediaDownload() {
             PlaySoundW(L"SystemAsterisk", NULL, SND_ALIAS | SND_ASYNC);
         }
     } else {
+        std::lock_guard<std::recursive_mutex> lock(m_mutex);
         m_state = DownloadState::Failed;
+        m_info.state = DownloadState::Failed;
+        m_info.currentSpeedBps = 0.0;
         m_info.errorMsg = L"Video indirme hatası (Kod: " + std::to_wstring(exitCode) + L")";
+        uint64_t partBytes = FindMediaPartialBytesLocked();
+        if (partBytes > m_info.downloadedBytes) {
+            m_info.downloadedBytes = partBytes;
+        }
         AddLog(m_info.errorMsg, 3);
     }
 
-    if (m_eventCb) m_eventCb(m_info.id);
+    NotifyEvent();
+    NotifyStateChanged();
 }
 
 void DownloadTask::Redownload() {
@@ -1355,10 +1601,17 @@ void DownloadTask::DeleteTask(bool deleteFile) {
         DeleteFileW(GetTempFilePath().c_str());
         DeleteFileW(GetStateFilePath().c_str());
         DeleteFileW(m_info.fullPath.c_str());
+        DeleteFileW((m_info.fullPath + L".part").c_str());
+        DeleteFileW((m_info.fullPath + L".ytdl").c_str());
+        if (!m_activeMediaPartPath.empty()) {
+            DeleteFileW(m_activeMediaPartPath.c_str());
+        }
     }
 
     m_state = DownloadState::Deleted;
-    if (m_eventCb) m_eventCb(m_info.id);
+    m_info.state = DownloadState::Deleted;
+    NotifyEvent();
+    NotifyStateChanged();
 }
 
 void DownloadTask::SaveState() {
@@ -1373,16 +1626,77 @@ void DownloadTask::LoadState() {
     // State files disabled per user request
 }
 
+uint64_t DownloadTask::FindMediaPartialBytesLocked() const {
+    uint64_t bestSize = 0;
+
+    if (!m_activeMediaPartPath.empty()) {
+        uint64_t sz = 0;
+        if (GetDiskFileSize64(m_activeMediaPartPath, sz) && sz > bestSize) {
+            bestSize = sz;
+        }
+    }
+
+    uint64_t directPart = 0;
+    if (GetDiskFileSize64(m_info.fullPath + L".part", directPart) && directPart > bestSize) {
+        bestSize = directPart;
+    }
+
+    if (!m_info.saveDirectory.empty() && !m_info.filename.empty()) {
+        std::wstring stem = m_info.filename;
+        size_t dot = stem.find_last_of(L'.');
+        if (dot != std::wstring::npos && dot > 0) {
+            stem = stem.substr(0, dot);
+        }
+        std::wstring pattern = m_info.saveDirectory + L"\\" + stem + L"*.part";
+        WIN32_FIND_DATAW fd;
+        HANDLE hFind = FindFirstFileW(pattern.c_str(), &fd);
+        if (hFind != INVALID_HANDLE_VALUE) {
+            uint64_t matchedSum = 0;
+            do {
+                if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+                    LARGE_INTEGER sz;
+                    sz.LowPart = fd.nFileSizeLow;
+                    sz.HighPart = fd.nFileSizeHigh;
+                    if (sz.QuadPart > 0) {
+                        matchedSum += static_cast<uint64_t>(sz.QuadPart);
+                    }
+                }
+            } while (FindNextFileW(hFind, &fd));
+            FindClose(hFind);
+            if (matchedSum > bestSize) {
+                bestSize = matchedSum;
+            }
+        }
+    }
+
+    return bestSize;
+}
+
 void DownloadTask::RestoreMetadata(const std::wstring& id,
                                    DownloadState state,
                                    const std::wstring& addedDate,
                                    const std::wstring& completedDate,
-                                   const std::wstring& category) {
+                                   const std::wstring& category,
+                                   uint64_t totalBytes,
+                                   uint64_t downloadedBytes,
+                                   bool supportsResume,
+                                   bool customFilenameSet,
+                                   const std::wstring& resolvedUrl,
+                                   const std::wstring& errorMsg,
+                                   const std::vector<SegmentInfo>& segments) {
     std::lock_guard<std::recursive_mutex> lock(m_mutex);
     if (!id.empty()) m_info.id = id;
     if (!category.empty()) m_info.category = category;
     if (!addedDate.empty()) m_info.addedDate = addedDate;
     if (!completedDate.empty()) m_info.completedDate = completedDate;
+
+    m_info.totalBytes = totalBytes;
+    m_info.downloadedBytes = downloadedBytes;
+    m_info.supportsResume = supportsResume;
+    m_customFilenameSet = customFilenameSet;
+    if (!resolvedUrl.empty()) m_resolvedUrl = resolvedUrl;
+    m_info.errorMsg = errorMsg;
+    m_info.segments = segments;
 
     if (state == DownloadState::Downloading || state == DownloadState::Connecting) {
         state = DownloadState::Paused;
@@ -1390,14 +1704,134 @@ void DownloadTask::RestoreMetadata(const std::wstring& id,
     m_state = state;
     m_info.state = state;
 
-    if (state == DownloadState::Completed) {
-        WIN32_FILE_ATTRIBUTE_DATA fad;
-        if (GetFileAttributesExW(m_info.fullPath.c_str(), GetFileExInfoStandard, &fad)) {
-            LARGE_INTEGER size;
-            size.LowPart = fad.nFileSizeLow;
-            size.HighPart = fad.nFileSizeHigh;
-            m_info.totalBytes = size.QuadPart;
-            m_info.downloadedBytes = size.QuadPart;
+    ReconcileWithDisk();
+}
+
+void DownloadTask::ReconcileWithDisk() {
+    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+    DownloadState st = m_state.load();
+
+    // Ensure fullPath stays in sync with saveDirectory and filename
+    if (!m_info.saveDirectory.empty() && !m_info.filename.empty()) {
+        m_info.fullPath = m_info.saveDirectory + L"\\" + m_info.filename;
+    }
+
+    uint64_t finalDiskSize = 0;
+    bool hasFinalFile = GetDiskFileSize64(m_info.fullPath, finalDiskSize);
+    uint64_t tempGetySize = 0;
+    bool hasTempGety = GetDiskFileSize64(GetTempFilePath(), tempGetySize);
+
+    if (st == DownloadState::Completed) {
+        if (hasFinalFile && finalDiskSize > 0) {
+            m_info.totalBytes = finalDiskSize;
+            m_info.downloadedBytes = finalDiskSize;
+        } else if (m_info.totalBytes > 0) {
+            m_info.downloadedBytes = m_info.totalBytes;
+        } else if (m_info.downloadedBytes > 0) {
+            m_info.totalBytes = m_info.downloadedBytes;
+        }
+        m_info.currentSpeedBps = 0.0;
+        for (auto& seg : m_info.segments) {
+            uint64_t segLen = seg.totalBytes();
+            if (segLen > 0) {
+                seg.downloadedBytes = segLen;
+                seg.currentOffset = seg.endByte + 1;
+            }
+            seg.speedBps = 0.0;
+            seg.status = 3;
+        }
+        return;
+    }
+
+    // Reconcile segment byte consistency first
+    if (!m_isMediaTask && !m_info.segments.empty()) {
+        uint64_t segSum = 0;
+        for (auto& seg : m_info.segments) {
+            uint64_t segLen = seg.totalBytes();
+            if (segLen > 0 && seg.downloadedBytes > segLen) {
+                seg.downloadedBytes = segLen;
+            }
+            seg.currentOffset = seg.startByte + seg.downloadedBytes;
+            seg.speedBps = 0.0;
+            if (segLen > 0 && seg.downloadedBytes >= segLen) {
+                seg.status = 3;
+            } else if (seg.status == 2) {
+                seg.status = 1; // interrupted -> paused
+            }
+            segSum += seg.downloadedBytes;
+        }
+        if (segSum > 0 || m_info.downloadedBytes > 0) {
+            m_info.downloadedBytes = segSum;
+        }
+    }
+
+    if (m_isMediaTask) {
+        uint64_t partBytes = FindMediaPartialBytesLocked();
+        bool hasPartOrYtdl = (partBytes > 0) || PathFileExistsW((m_info.fullPath + L".ytdl").c_str());
+
+        // If yt-dlp finished writing the merged/final media file right before an unclean exit,
+        // promote the task to Completed instead of showing it as incomplete Paused!
+        if (hasFinalFile && finalDiskSize > 0 && !hasPartOrYtdl &&
+            (st == DownloadState::Paused || st == DownloadState::Queued || st == DownloadState::Failed)) {
+            if (m_info.totalBytes == 0 || m_info.downloadedBytes == 0 ||
+                finalDiskSize >= (m_info.totalBytes * 90 / 100) ||
+                m_info.downloadedBytes >= (finalDiskSize * 90 / 100)) {
+                m_state = DownloadState::Completed;
+                m_info.state = DownloadState::Completed;
+                m_info.totalBytes = finalDiskSize;
+                m_info.downloadedBytes = finalDiskSize;
+                m_info.currentSpeedBps = 0.0;
+                m_info.errorMsg.clear();
+                if (m_info.completedDate.empty()) m_info.completedDate = GetCurrentDateString();
+                if (!m_info.segments.empty()) {
+                    m_info.segments[0].endByte = finalDiskSize - 1;
+                    m_info.segments[0].downloadedBytes = finalDiskSize;
+                    m_info.segments[0].status = 3;
+                }
+                return;
+            }
+        }
+
+        if (partBytes > m_info.downloadedBytes) {
+            m_info.downloadedBytes = partBytes;
+        }
+        if (m_info.totalBytes > 0 && m_info.downloadedBytes > m_info.totalBytes) {
+            m_info.totalBytes = m_info.downloadedBytes;
+        }
+        if (!m_info.segments.empty()) {
+            m_info.segments[0].downloadedBytes = m_info.downloadedBytes;
+            if (m_info.totalBytes > 0) {
+                m_info.segments[0].endByte = m_info.totalBytes - 1;
+            }
+            m_info.segments[0].speedBps = 0.0;
+            if (m_info.segments[0].status == 2) m_info.segments[0].status = 1;
+        }
+    } else {
+        // Non-media HTTP task: check if finished final file already exists on disk without .gety
+        if (hasFinalFile && finalDiskSize > 0 && !hasTempGety &&
+            (m_info.totalBytes == 0 || finalDiskSize == m_info.totalBytes)) {
+            m_state = DownloadState::Completed;
+            m_info.state = DownloadState::Completed;
+            m_info.totalBytes = finalDiskSize;
+            m_info.downloadedBytes = finalDiskSize;
+            m_info.currentSpeedBps = 0.0;
+            m_info.errorMsg.clear();
+            if (m_info.completedDate.empty()) m_info.completedDate = GetCurrentDateString();
+            for (auto& seg : m_info.segments) {
+                uint64_t segLen = seg.totalBytes();
+                if (segLen > 0) {
+                    seg.downloadedBytes = segLen;
+                    seg.currentOffset = seg.endByte + 1;
+                }
+                seg.speedBps = 0.0;
+                seg.status = 3;
+            }
+            return;
+        }
+
+        // Migrate v4 tasks: .gety pre-allocated file on disk reveals totalBytes when not persisted previously
+        if (m_info.totalBytes == 0 && hasTempGety && tempGetySize > 0) {
+            m_info.totalBytes = tempGetySize;
         }
     }
 }

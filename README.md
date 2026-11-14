@@ -1,4 +1,4 @@
-# ⚡ Gety - Ultra-Fast C++20 Native Download Manager & AI Model Downloader
+# ⚡ Gety - Ultra-Fast C++23 Native Download Manager & AI Model Downloader
 
 <p align="center">
   <img src="docs/screenshots/main_window.png" alt="Gety Main Interface" width="850">
@@ -6,20 +6,20 @@
 
 <p align="center">
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
-  <img src="https://img.shields.io/badge/C%2B%2B-20-00599C?logo=c%2B%2B" alt="C++20">
+  <img src="https://img.shields.io/badge/C%2B%2B-23-00599C?logo=c%2B%2B" alt="C++23">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0078D6?logo=windows" alt="Platform: Windows x64">
   <img src="https://img.shields.io/badge/UI-Direct2D%20Hardware%20Accelerated-informational" alt="Direct2D">
   <img src="https://img.shields.io/badge/Vibe%20Coding-Gemini%203.8%20%7C%20DeepMind-8A2BE2" alt="Vibe Coded with Gemini 3.8">
   <img src="https://img.shields.io/badge/Portable-Zero%20Registry%20%7C%20%2FMT-success" alt="Portable">
 </p>
 
-**Gety** is a high-performance, lightweight Windows download manager written in pure **C++20** with native **Win32** and **Direct2D** graphics. Designed for maximum speed and zero bloat, Gety features a multi-threaded segmented download engine, deep integration for downloading AI models (**Ollama** and **Hugging Face**), media extraction, a floating desktop drop target, and military-grade DPAPI AES-256 encrypted task persistence.
+**Gety** is a high-performance, lightweight Windows download manager written in pure **C++23** with native **Win32** and **Direct2D** graphics. Designed for maximum speed and zero bloat, Gety features a multi-threaded segmented download engine, deep integration for downloading AI models (**Ollama** and **Hugging Face**), media extraction, a floating desktop drop target, and military-grade DPAPI AES-256 encrypted task persistence.
 
 ---
 
 ## 🌟 Key Highlights
 
-- **Pure Native C++20 & Win32**: No Electron, no Qt, no bloated web views. Executable is self-contained (~1.7 MB) and statically linked (`/MT`). Idle RAM usage is only ~8–15 MB.
+- **Pure Native C++23 & Win32**: No Electron, no Qt, no bloated web views. Executable is self-contained (~1.7 MB) and statically linked (`/MT`). Idle RAM usage is only ~8–15 MB.
 - **1 to 30 Segmented Download Engine**: Dynamically splits files across multiple concurrent HTTP/HTTPS connections (`HTTP/1.1 206 Partial Content`).
 - **Zero-Wait Pre-Allocation**: Files are pre-allocated on disk (`SetEndOfFile`). Chunks write directly to designated offsets with overlapped asynchronous I/O. When the last byte completes, your file is immediately ready without merge delays.
 - **Native AI Model Downloader**:
@@ -27,7 +27,8 @@
   - 🤗 **Hugging Face Hub Support**: Fetch any repository or model (e.g. `unsloth/DeepSeek-R1-Distill-Qwen-7B-GGUF`), resolve direct Cloudflare/S3 CDN endpoints, filter files, authenticate private/gated models with Bearer tokens, and leverage smart GGUF quantization scoring.
 - **Direct2D Visual Download Matrix**: Real-time hardware-accelerated grid displaying active, completed, and pending byte ranges with zero latency.
 - **Floating Desktop Drop Zone**: Semi-transparent HUD overlay that floats over games or browser windows, accepting drag-and-drop links with live throughput telemetry.
-- **Encrypted Task Storage**: State and download history are protected with Windows Data Protection API (DPAPI AES-256) inside clean JSON files.
+- **Crash-Resilient Encrypted Task Storage (`v5`)**: Atomic temp-and-swap DPAPI AES-256 `tasks.json` persistence with automatic `.bak` failover, 64-bit exact per-segment byte offsets, periodic auto-save, disk reconciliation, and graceful Windows shutdown hooks (`WM_QUERYENDSESSION` / `WM_ENDSESSION`).
+- **Seamless Windows Auto-Start**: Optional one-click startup in background tray (`--minimized`) from Options or the System Tray menu, with automatic portable path self-healing if `Gety.exe` is moved.
 - **Commercial Friendly**: Released under the permissive **MIT License**.
 
 ---
@@ -68,18 +69,26 @@ Gety brings AI model acquisition directly into a fast, multi-threaded native dow
 
 | Component | Implementation Details |
 | :--- | :--- |
-| **Language & Standard** | ISO C++20 (`/std:c++20`, `/permissive-`, MSVC 2022) |
+| **Language & Standard** | ISO C++23 (`/std:c++latest`, `/permissive-`, `/Zc:__cplusplus`, MSVC 2022) |
 | **GUI Framework** | Native Win32 API, Custom Dark Theme, Direct2D & DirectWrite |
-| **Network Stack** | Microsoft WinHTTP with hardware-accelerated Windows Schannel (TLS 1.2 / 1.3) |
-| **File I/O** | Win32 Asynchronous Overlapped I/O, Sparse File & Pre-allocation (`SetFileValidData`) |
-| **Concurrency** | `std::jthread`, `std::mutex`, `std::condition_variable`, lock-free atomics |
-| **Security & Cryptography**| Windows Crypt32 DPAPI (AES-256-CBC) |
-| **Persistence** | Portable zero-registry `portable_data/tasks.enc.json` |
-| **External Media** | Native integration with `yt-dlp` for video & audio stream extraction |
+| **Network Stack** | Microsoft WinHTTP with HTTP/2 & HTTP/3 negotiation + Windows Schannel (TLS 1.2 / 1.3) |
+| **File I/O** | Win32 Asynchronous Overlapped I/O, Pre-allocation (`SetEndOfFile`), Atomic `MoveFileExW` |
+| **Concurrency** | Deterministic `std::thread` joins, `std::recursive_mutex`, lock-free atomics |
+| **Security & Cryptography**| Windows Crypt32 DPAPI (AES-256) with portable fallback |
+| **Persistence** | Crash-safe atomic `v5` JSON (`portable_data/tasks.json` + `.bak` failover) & disk reconciliation |
+| **System Integration** | Windows Startup (`HKCU\...\Run` `--minimized`), `WM_COPYDATA` single-instance IPC, `WM_ENDSESSION` |
+| **External Media** | Native integration with `yt-dlp` (`2026.10.26+`) & `ffmpeg` for video/audio stream extraction |
 
 ---
 
 ## 🚀 Recent Updates & Bug Fixes
+
+### What's New in v1.1.0 — Persistence Overhaul, Windows Auto-Start & C++23 Upgrade
+- **v5 Crash-Resilient State & Segment Persistence:** Upgraded `tasks.json` to schema `v5`, persisting exact 64-bit `totalBytes`, `downloadedBytes`, `supportsResume`, `resolvedUrl`, and full per-segment byte offsets (`segments` array) so multi-part and large (>4 GB) downloads never reset to `0%` or restart from byte `0` after closing Gety or rebooting Windows.
+- **Atomic Saves, Auto-Backup & Windows Shutdown Hooks:** Replaced in-place file truncation with atomic `tasks.json.tmp` → `MoveFileExW` commits, automatic `tasks.json.bak` recovery on corruption, event-driven + 3-second periodic auto-saves, and Win32 `WM_QUERYENDSESSION` / `WM_ENDSESSION` handlers.
+- **Smart Disk Reconciliation & UI Progress Accuracy:** Added startup disk reconciliation (`ReconcileWithDisk`) that automatically promotes already-finished `.mp4`/binary files on disk to `Completed`, recovers partial `.part` media byte counts, and ensures `Completed` tasks always render at `100.0%` even if the file is later moved externally.
+- **Windows Startup (`--minimized`) & Tray Toggle:** Added strict CLI flag parsing (`CliArgs.h`) so `--minimized` / `--autostart` / `--tray` launches silently in the system tray without queuing flags as download URLs, added a **Start automatically with Windows** toggle directly to the System Tray right-click menu, and added automatic Registry path self-healing when portable `Gety.exe` is moved.
+- **C++23, Windows 11 SDK & Modern WinHTTP Stack:** Upgraded build toolchain to **C++23**, centralized `WinHttpUtils::CreateSession()` with **HTTP/2 + HTTP/3** negotiation, **TLS 1.2 / 1.3**, automatic gzip/deflate decompression for Ollama & Hugging Face API clients, updated `yt-dlp` integration (`~` approximate size parsing, intermediate stream suffix handling), and expanded the test suite to **19 automated engine tests**.
 
 ### 1. Robust Download Pause & Worker Thread Management
 - **Eliminated Unwanted Auto-Resume:** Fixed a critical race condition where terminating segment workers during pause reported simulated network dropouts, unintentionally triggering the engine's automatic reconnect/retry loop after a 2-second timeout.
@@ -105,7 +114,7 @@ Gety brings AI model acquisition directly into a fast, multi-threaded native dow
 
 ### Prerequisites
 - **Operating System**: Windows 10 / 11 (x64)
-- **Compiler**: Visual Studio 2022 (MSVC v143) with C++20 Desktop Development workload
+- **Compiler**: Visual Studio 2022 (MSVC v143) with C++23 / Desktop Development with C++ workload
 - **Build System**: CMake 3.20 or newer
 
 ### Build Steps
@@ -126,7 +135,7 @@ The compiled standalone executable will be generated at `build/Release/Gety.exe`
 
 ### Running Automated Tests
 
-Gety includes comprehensive engine tests (HTTP parsing, range calculations, DPAPI encryption, manifest validation):
+Gety includes 19 automated engine tests (HTTP parsing, 64-bit JSON precision, v5 DPAPI state & `.bak` recovery, disk reconciliation, CLI/Registry autostart roundtrip, Ollama & Hugging Face live Hub resolution):
 
 ```powershell
 cmake --build build --config Release --target test_engine
@@ -144,7 +153,7 @@ Gety's native AI model download capabilities were inspired by and reference the 
 2. **[bodaay/HuggingFaceModelDownloader](https://github.com/bodaay/HuggingFaceModelDownloader)** by [@bodaay](https://github.com/bodaay)
    - *Inspiration*: Hugging Face API file tree resolution, direct CDN header following, and GGUF quantization scoring strategies.
 
-Both projects provided tremendous architectural inspiration, which we reimplemented as pure native C++20 modules with multi-threaded WinHTTP streaming. Special thanks to the authors!
+Both projects provided tremendous architectural inspiration, which we reimplemented as pure native C++23 modules with multi-threaded WinHTTP streaming. Special thanks to the authors!
 
 ---
 
@@ -153,7 +162,7 @@ Both projects provided tremendous architectural inspiration, which we reimplemen
 This project embraces the future of software engineering: **Gety was developed through Vibe Coding with Google DeepMind's Gemini 3.8 via Antigravity**.
 
 - **Human Vision & Direction**: System architecture design, UX conception, performance specifications, and real-time validation by [@geataa](https://github.com/geataa).
-- **AI Agentic Execution**: High-performance C++20 native code synthesis, Win32 message loop design, Direct2D rendering pipelines, and security implementations powered by **Gemini 3.8**.
+- **AI Agentic Execution**: High-performance C++23 native code synthesis, Win32 message loop design, Direct2D rendering pipelines, and security implementations powered by **Gemini 3.8**.
 - **Zero Hallucination Standard**: 100% verified with deterministic automated test suites and live execution benchmarks.
 
 We believe in radical transparency: AI-assisted development empowers solo creators to deliver robust, industrial-grade native applications at breakneck speed.
@@ -193,5 +202,5 @@ You are free to use, modify, distribute, and incorporate Gety into private and *
 ---
 
 <p align="center">
-  Crafted with ❤️, C++20, and Vibe Coding by <b>SkySoft / geataa</b>.
+  Crafted with ❤️, C++23, and Vibe Coding by <b>SkySoft / geataa</b>.
 </p>

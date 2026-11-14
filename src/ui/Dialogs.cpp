@@ -3607,7 +3607,10 @@ static LRESULT CALLBACK AboutDlgProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM 
             SelectObject(hdc, hFontSub);
             SetTextColor(hdc, Theme::TextMuted);
             RECT subR = { 0, DlgScale(hwnd, 82), rc.right, DlgScale(hwnd, 104) };
-            DrawTextW(hdc, L"Sürüm 1.0.1 (C++20 Native Ultra-Fast Edition)", -1, &subR, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
+            bool isTr = (I18n::Instance().GetCurrentLanguage() == LangId::Turkish);
+            DrawTextW(hdc, isTr ? L"Sürüm 1.1.0 (C++23 Native Ultra-Fast Edition)"
+                                : L"Version 1.1.0 (C++23 Native Ultra-Fast Edition)",
+                      -1, &subR, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
 
             // Content text inside card
             HFONT hFontBody = Theme::CreateAppFont(hwnd, 9, FW_NORMAL);

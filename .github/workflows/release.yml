@@ -10,9 +10,9 @@ on:
   workflow_dispatch:
     inputs:
       tag_name:
-        description: 'Release Tag Version (e.g., v1.0.0)'
+        description: 'Release Tag Version (e.g., v1.1.0)'
         required: false
-        default: 'v1.0.0'
+        default: 'v1.1.0'
       create_release:
         description: 'Publish as GitHub Release (true/false)'
         required: false
@@ -48,7 +48,7 @@ jobs:
       - name: Package Portable Distribution
         shell: pwsh
         run: |
-          $ver = if ("${{ github.ref_name }}" -match "^v[0-9]") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.tag_name }}") { "${{ github.event.inputs.tag_name }}" } else { "v1.0.0" }
+          $ver = if ("${{ github.ref_name }}" -match "^v[0-9]") { "${{ github.ref_name }}" } elseif ("${{ github.event.inputs.tag_name }}") { "${{ github.event.inputs.tag_name }}" } else { "v1.1.0" }
           
           # Create clean staging directory
           New-Item -ItemType Directory -Force -Path dist/Gety
@@ -78,7 +78,7 @@ jobs:
             Gety-*.zip
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'false')
+        if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.create_release != 'false')
         uses: softprops/action-gh-release@v2
         with:
           files: |
@@ -86,21 +86,26 @@ jobs:
             ${{ env.ZIP_NAME }}
             Gety-Portable-x64.zip
           tag_name: ${{ env.RELEASE_TAG }}
-          name: Gety ${{ env.RELEASE_TAG }} - Ultra-Fast Download Manager & AI Model Hub
+          name: Gety ${{ env.RELEASE_TAG }} - Ultra-Fast C++23 Download Manager & AI Model Hub
           draft: false
           prerelease: false
           generate_release_notes: true
           body: |
             ## ⚡ Gety ${{ env.RELEASE_TAG }}
             
-            Welcome to the official release of **Gety**, the high-performance native Windows download manager and AI model acquisition tool!
+            Welcome to **Gety ${{ env.RELEASE_TAG }}**, the high-performance native Windows download manager and AI model acquisition tool!
             
             ### 📦 Downloads
-            - **`Gety.exe`**: Standalone single portable executable (~1.7 MB). Just download and run!
+            - **`Gety.exe`**: Standalone single portable executable (~1.8 MB, `/MT` static C++23). Just download and run!
             - **`${{ env.ZIP_NAME }}`**: Portable zip package with documentation and license.
             
+            ### 🚀 What's New in v1.1.0
+            - **Crash-Resilient `v5` Persistence & Disk Reconciliation**: Full 64-bit byte & per-segment offset persistence across restarts, atomic `.tmp` + `.bak` DPAPI writes, periodic auto-save, `WM_QUERYENDSESSION`/`WM_ENDSESSION` shutdown hooks, and automatic disk state reconciliation for finished/partial downloads.
+            - **Seamless Windows Auto-Start (`--minimized`)**: Start silently in the system tray with Windows via Options or the Tray right-click menu, with strict CLI flag separation and portable `.exe` path self-healing.
+            - **C++23 & Modern WinHTTP Stack**: Upgraded to ISO C++23, HTTP/2 & HTTP/3 protocol negotiation, TLS 1.2/1.3, compressed Hub API responses, and improved `yt-dlp` progress/stream handling.
+            
             ### 🌟 Key Features
-            - **Pure C++20 & Native Win32**: Ultra-lightweight (~1.7 MB, ~10 MB RAM usage, zero external DLL dependencies).
+            - **Pure C++23 & Native Win32**: Ultra-lightweight native binary with zero external DLL dependencies.
             - **Multi-Segment Engine**: 1–30 parallel connections with zero-wait pre-allocated file merge.
             - **🤖 Ollama Model Downloader**: Download LLMs directly by name (`llama3`, `deepseek-r1`, etc.) as GGUF or raw layers.
             - **🤗 Hugging Face Model Downloader**: Live repo tree resolution, CDN redirect acceleration, and automated ⭐ GGUF quantization scoring.

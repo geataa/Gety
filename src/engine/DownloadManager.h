@@ -63,12 +63,17 @@ private:
     DownloadManager();
     ~DownloadManager();
 
+    void ConfigureTaskCallbacks(const std::shared_ptr<DownloadTask>& task);
+    bool TryLoadFromJsonFile(const std::wstring& filePath);
+
     mutable std::mutex m_mutex;
     std::vector<std::shared_ptr<DownloadTask>> m_tasks;
     UpdateCallback m_onUpdate;
 
     std::thread m_timerThread;
     std::atomic<bool> m_running = false;
+    std::atomic<bool> m_tasksDirty = false;
+    std::chrono::steady_clock::time_point m_lastAutoSaveTime{};
 };
 
 } // namespace Gety

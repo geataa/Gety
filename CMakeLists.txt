@@ -1,8 +1,9 @@
-cmake_minimum_required(VERSION 3.20)
-project(Gety VERSION 1.0.1 LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.20...3.31)
+project(Gety VERSION 1.1.0 LANGUAGES CXX)
 
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
 
 # 100% Portable Static C++ Runtime (/MT in Release, /MTd in Debug)
 set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
@@ -23,6 +24,7 @@ set(SOURCES
     src/main.cpp
     src/core/Config.h
     src/core/Config.cpp
+    src/core/CliArgs.h
     src/core/I18n.h
     src/core/I18n.cpp
     src/core/Types.h
@@ -66,7 +68,7 @@ set(SOURCES
 add_executable(Gety WIN32 ${SOURCES})
 
 target_compile_options(Gety PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 $<$<CONFIG:Release>:/O2 /Oi /Ot> /Zi>
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 /permissive- /Zc:__cplusplus $<$<CONFIG:Release>:/O2 /Oi /Ot> /Zi>
 )
 
 target_link_options(Gety PRIVATE
@@ -101,6 +103,7 @@ add_executable(test_engine
     tests/test_engine.cpp
     src/core/Config.h
     src/core/Config.cpp
+    src/core/CliArgs.h
     src/core/I18n.h
     src/core/I18n.cpp
     src/core/Types.h
@@ -116,6 +119,8 @@ add_executable(test_engine
     src/engine/SegmentWorker.cpp
     src/engine/DownloadTask.h
     src/engine/DownloadTask.cpp
+    src/engine/DownloadManager.h
+    src/engine/DownloadManager.cpp
     src/engine/MediaExtractor.h
     src/engine/MediaExtractor.cpp
     src/engine/OllamaClient.h
@@ -125,7 +130,7 @@ add_executable(test_engine
 )
 
 target_compile_options(test_engine PRIVATE
-    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 $<$<CONFIG:Release>:/O2>>
+    $<$<CXX_COMPILER_ID:MSVC>:/utf-8 /W3 /permissive- /Zc:__cplusplus $<$<CONFIG:Release>:/O2>>
 )
 
 target_link_libraries(test_engine PRIVATE

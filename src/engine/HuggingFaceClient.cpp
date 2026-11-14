@@ -330,20 +330,11 @@ HuggingFaceFetchResult HuggingFaceClient::FetchModelTree(const HuggingFaceModelS
         statusCb(L"Hugging Face Hub API'sine bağlanılıyor: " + spec.repoId + L"...");
     }
 
-    HINTERNET hSession = WinHttpOpen(
-        L"Gety/1.0.1 (Windows; Win64; x64)",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0
-    );
+    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, true);
     if (!hSession) {
         result.errorMsg = L"WinHTTP başlatılamadı.";
         return result;
     }
-
-    DWORD secureProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-    WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &secureProtocols, sizeof(secureProtocols));
 
     HINTERNET hConnect = WinHttpConnect(hSession, L"huggingface.co", INTERNET_DEFAULT_HTTPS_PORT, 0);
     if (!hConnect) {
@@ -586,20 +577,11 @@ bool HuggingFaceClient::ResolveDownloadUrl(const std::wstring& downloadUrl,
         return false;
     }
 
-    HINTERNET hSession = WinHttpOpen(
-        L"Gety/1.0.1 (Windows; Win64; x64)",
-        WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-        WINHTTP_NO_PROXY_NAME,
-        WINHTTP_NO_PROXY_BYPASS,
-        0
-    );
+    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, false);
     if (!hSession) {
         outError = L"WinHTTP başlatılamadı";
         return false;
     }
-
-    DWORD secureProtocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2 | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-    WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &secureProtocols, sizeof(secureProtocols));
 
     HINTERNET hConnect = WinHttpConnect(hSession, parts.host.c_str(), parts.port, 0);
     if (!hConnect) {

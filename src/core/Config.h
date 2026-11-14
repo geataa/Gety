@@ -16,6 +16,11 @@ public:
     std::wstring GetAppDir() const { return m_appDir; }
     std::wstring GetPortableDataDir() const { return m_portableDataDir; }
     std::wstring GetIniFilePath() const { return m_iniFilePath; }
+    void SetPortableDataDir(const std::wstring& dir) {
+        m_portableDataDir = dir;
+        m_iniFilePath = dir + L"\\Gety.ini";
+        CreateDirectoryW(m_portableDataDir.c_str(), NULL);
+    }
 
     // Settings
     std::wstring defaultSavePath;
@@ -42,6 +47,13 @@ public:
 
     bool IsAutoStartEnabled() const;
     void SetAutoStartEnabled(bool enable);
+    std::wstring GetAutoStartCommand() const;
+    static std::wstring BuildAutoStartCommand(const std::wstring& exePath);
+
+    // Parameterized helpers (default valueName = L"Gety") to support clean unit testing
+    bool IsAutoStartValueEnabled(const wchar_t* valueName) const;
+    bool SetAutoStartValue(bool enable, const wchar_t* valueName) const;
+    std::wstring ReadAutoStartValue(const wchar_t* valueName) const;
 
     int windowX = 100;
     int windowY = 100;

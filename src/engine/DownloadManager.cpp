@@ -25,6 +25,7 @@ DownloadManager::~DownloadManager() {
 void DownloadManager::Init(UpdateCallback onUpdate) {
     m_onUpdate = onUpdate;
     LoadTasks();
+    m_lastAutoSaveTime = std::chrono::steady_clock::now();
 
     m_running = true;
     m_timerThread = std::thread([this]() {
@@ -33,6 +34,17 @@ void DownloadManager::Init(UpdateCallback onUpdate) {
             if (!m_running.load()) break;
 
             TickQueue();
+
+            auto now = std::chrono::steady_clock::now();
+            bool needSave = m_tasksDirty.exchange(false);
+            if (!needSave && GetActiveCount() > 0 &&
+                std::chrono::duration_cast<std::chrono::seconds>(now - m_lastAutoSaveTime).count() >= 3) {
+                needSave = true;
+            }
+            if (needSave) {
+                SaveTasks();
+                m_lastAutoSaveTime = now;
+            }
 
             if (m_onUpdate) {
                 m_onUpdate();
@@ -52,28 +64,54 @@ void DownloadManager::Shutdown() {
 }
 
 void DownloadManager::TickQueue() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::shared_ptr<DownloadTask>> toStart;
+    std::vector<std::shared_ptr<DownloadTask>> toRetry;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    int activeCount = 0;
-    for (const auto& t : m_tasks) {
-        DownloadState s = t->GetState();
-        if (s == DownloadState::Downloading || s == DownloadState::Connecting) {
-            activeCount++;
-        }
-    }
-
-    int maxAllowed = Config::Instance().maxActiveDownloads;
-    if (activeCount < maxAllowed) {
-        for (auto& t : m_tasks) {
-            if (t->GetState() == DownloadState::Queued) {
-                t->Start();
+        int activeCount = 0;
+        for (const auto& t : m_tasks) {
+            DownloadState s = t->GetState();
+            if (s == DownloadState::Downloading || s == DownloadState::Connecting) {
                 activeCount++;
-                if (activeCount >= maxAllowed) {
-                    break;
+                if (s == DownloadState::Connecting && t->CheckScheduledRetryReady()) {
+                    toRetry.push_back(t);
+                }
+            }
+        }
+
+        int maxAllowed = Config::Instance().maxActiveDownloads;
+        if (activeCount < maxAllowed) {
+            for (auto& t : m_tasks) {
+                if (t->GetState() == DownloadState::Queued) {
+                    toStart.push_back(t);
+                    activeCount++;
+                    if (activeCount >= maxAllowed) {
+                        break;
+                    }
                 }
             }
         }
     }
+
+    for (auto& t : toRetry) {
+        t->ExecuteScheduledRetry();
+    }
+    for (auto& t : toStart) {
+        t->Start();
+    }
+    if (!toStart.empty()) {
+        m_tasksDirty = true;
+    }
+}
+
+void DownloadManager::ConfigureTaskCallbacks(const std::shared_ptr<DownloadTask>& task) {
+    task->SetEventCallback([this](const std::wstring& /*id*/) {
+        if (m_onUpdate) m_onUpdate();
+    });
+    task->SetStateChangedCallback([this](const std::wstring& /*id*/) {
+        m_tasksDirty = true;
+    });
 }
 
 std::wstring DownloadManager::AddTask(const std::wstring& url,
@@ -88,9 +126,7 @@ std::wstring DownloadManager::AddTask(const std::wstring& url,
     }
 
     auto task = std::make_shared<DownloadTask>(url, saveDir, category, splitParts, customFilename);
-    task->SetEventCallback([this](const std::wstring& /*id*/) {
-        if (m_onUpdate) m_onUpdate();
-    });
+    ConfigureTaskCallbacks(task);
 
     std::wstring taskId = task->GetId();
 
@@ -119,9 +155,7 @@ std::wstring DownloadManager::AddMediaTask(const std::wstring& url,
     std::wstring sDir = saveDir.empty() ? Config::Instance().defaultSavePath : saveDir;
     std::wstring cat = category.empty() ? L"Video" : category;
     auto task = std::make_shared<DownloadTask>(url, sDir, cat, 1, title, true, formatSelector);
-    task->SetEventCallback([this](const std::wstring& /*id*/) {
-        if (m_onUpdate) m_onUpdate();
-    });
+    ConfigureTaskCallbacks(task);
 
     std::wstring taskId = task->GetId();
 
@@ -258,26 +292,34 @@ bool DownloadManager::RenameTask(const std::wstring& id, const std::wstring& new
 }
 
 void DownloadManager::MoveTaskUp(const std::wstring& id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (size_t i = 1; i < m_tasks.size(); ++i) {
-        if (m_tasks[i]->GetId() == id) {
-            std::swap(m_tasks[i], m_tasks[i - 1]);
-            break;
+    bool moved = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (size_t i = 1; i < m_tasks.size(); ++i) {
+            if (m_tasks[i]->GetId() == id) {
+                std::swap(m_tasks[i], m_tasks[i - 1]);
+                moved = true;
+                break;
+            }
         }
     }
-    SaveTasks();
+    if (moved) SaveTasks();
     if (m_onUpdate) m_onUpdate();
 }
 
 void DownloadManager::MoveTaskDown(const std::wstring& id) {
-    std::lock_guard<std::mutex> lock(m_mutex);
-    for (size_t i = 0; i + 1 < m_tasks.size(); ++i) {
-        if (m_tasks[i]->GetId() == id) {
-            std::swap(m_tasks[i], m_tasks[i + 1]);
-            break;
+    bool moved = false;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        for (size_t i = 0; i + 1 < m_tasks.size(); ++i) {
+            if (m_tasks[i]->GetId() == id) {
+                std::swap(m_tasks[i], m_tasks[i + 1]);
+                moved = true;
+                break;
+            }
         }
     }
-    SaveTasks();
+    if (moved) SaveTasks();
     if (m_onUpdate) m_onUpdate();
 }
 
@@ -383,32 +425,58 @@ static std::wstring GetCurrentIsoDateTime() {
 }
 
 void DownloadManager::SaveTasks() {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::vector<std::shared_ptr<DownloadTask>> tasksCopy;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        tasksCopy = m_tasks;
+    }
 
     std::ostringstream innerJson;
     innerJson << "{\n";
-    innerJson << "  \"version\": 4,\n";
+    innerJson << "  \"version\": 5,\n";
     innerJson << "  \"savedAt\": \"" << JsonParser::WideToUtf8(GetCurrentIsoDateTime()) << "\",\n";
-    innerJson << "  \"taskCount\": " << m_tasks.size() << ",\n";
+    innerJson << "  \"taskCount\": " << tasksCopy.size() << ",\n";
     innerJson << "  \"tasks\": [\n";
 
-    for (size_t i = 0; i < m_tasks.size(); ++i) {
-        const auto& t = m_tasks[i];
+    for (size_t i = 0; i < tasksCopy.size(); ++i) {
+        const auto& t = tasksCopy[i];
         auto snap = t->GetSnapshot();
         auto logs = t->GetLogs();
 
         innerJson << "    {\n";
         innerJson << "      \"id\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.id)) << "\",\n";
         innerJson << "      \"url\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.url)) << "\",\n";
+        innerJson << "      \"resolvedUrl\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(t->GetResolvedUrl())) << "\",\n";
         innerJson << "      \"filename\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.filename)) << "\",\n";
         innerJson << "      \"saveDirectory\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.saveDirectory)) << "\",\n";
         innerJson << "      \"category\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.category)) << "\",\n";
         innerJson << "      \"splitCount\": " << snap.splitCount << ",\n";
         innerJson << "      \"state\": " << (int)snap.state << ",\n";
+        innerJson << "      \"totalBytes\": " << snap.totalBytes << ",\n";
+        innerJson << "      \"downloadedBytes\": " << snap.downloadedBytes << ",\n";
+        innerJson << "      \"supportsResume\": " << (snap.supportsResume ? "true" : "false") << ",\n";
+        innerJson << "      \"customFilenameSet\": " << (t->IsCustomFilenameSet() ? "true" : "false") << ",\n";
+        innerJson << "      \"errorMsg\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.errorMsg)) << "\",\n";
         innerJson << "      \"addedDate\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.addedDate)) << "\",\n";
         innerJson << "      \"completedDate\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(snap.completedDate)) << "\",\n";
         innerJson << "      \"isMedia\": " << (t->IsMediaTask() ? "true" : "false") << ",\n";
         innerJson << "      \"mediaFormat\": \"" << JsonParser::EscapeString(JsonParser::WideToUtf8(t->GetMediaFormat())) << "\",\n";
+
+        // Segments array so exact per-segment offsets & progress survive restarts
+        innerJson << "      \"segments\": [\n";
+        for (size_t s = 0; s < snap.segments.size(); ++s) {
+            const auto& seg = snap.segments[s];
+            int persistedStatus = (seg.status == 2) ? 1 : seg.status; // active downloading -> paused
+            innerJson << "        {\n";
+            innerJson << "          \"id\": " << seg.id << ",\n";
+            innerJson << "          \"startByte\": " << seg.startByte << ",\n";
+            innerJson << "          \"endByte\": " << seg.endByte << ",\n";
+            innerJson << "          \"currentOffset\": " << seg.currentOffset << ",\n";
+            innerJson << "          \"downloadedBytes\": " << seg.downloadedBytes << ",\n";
+            innerJson << "          \"status\": " << persistedStatus << "\n";
+            innerJson << "        }" << (s + 1 < snap.segments.size() ? "," : "") << "\n";
+        }
+        innerJson << "      ],\n";
 
         // Task logs array
         innerJson << "      \"logs\": [\n";
@@ -421,7 +489,7 @@ void DownloadManager::SaveTasks() {
         }
         innerJson << "      ]\n";
 
-        innerJson << "    }" << (i + 1 < m_tasks.size() ? "," : "") << "\n";
+        innerJson << "    }" << (i + 1 < tasksCopy.size() ? "," : "") << "\n";
     }
     innerJson << "  ]\n";
     innerJson << "}\n";
@@ -435,92 +503,156 @@ void DownloadManager::SaveTasks() {
     std::ostringstream envelope;
     envelope << "{\n";
     envelope << "  \"format\": \"gety_tasks\",\n";
-    envelope << "  \"version\": 4,\n";
+    envelope << "  \"version\": 5,\n";
     envelope << "  \"encrypted\": true,\n";
     envelope << "  \"cipher\": \"Windows-DPAPI\",\n";
-    envelope << "  \"taskCount\": " << m_tasks.size() << ",\n";
+    envelope << "  \"taskCount\": " << tasksCopy.size() << ",\n";
     envelope << "  \"payload\": \"" << encryptedPayload << "\"\n";
     envelope << "}\n";
 
-    std::wstring jsonPath = Config::Instance().GetPortableDataDir() + L"\\tasks.json";
-    std::ofstream out(std::filesystem::path(jsonPath), std::ios::out | std::ios::trunc);
-    if (out.is_open()) {
-        out << envelope.str();
-        out.close();
+    std::wstring dataDir = Config::Instance().GetPortableDataDir();
+    CreateDirectoryW(dataDir.c_str(), NULL);
+
+    std::wstring jsonPath = dataDir + L"\\tasks.json";
+    std::wstring tmpPath = jsonPath + L".tmp";
+    std::wstring bakPath = jsonPath + L".bak";
+
+    std::ofstream out(std::filesystem::path(tmpPath), std::ios::out | std::ios::trunc | std::ios::binary);
+    if (!out.is_open()) return;
+    std::string envStr = envelope.str();
+    out.write(envStr.data(), static_cast<std::streamsize>(envStr.size()));
+    out.flush();
+    bool writeOk = !out.fail();
+    out.close();
+
+    if (!writeOk) {
+        DeleteFileW(tmpPath.c_str());
+        return;
+    }
+
+    if (std::filesystem::exists(std::filesystem::path(jsonPath))) {
+        CopyFileW(jsonPath.c_str(), bakPath.c_str(), FALSE);
+    }
+
+    if (!MoveFileExW(tmpPath.c_str(), jsonPath.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+        // Fallback for virtual filesystems that reject write-through
+        MoveFileExW(tmpPath.c_str(), jsonPath.c_str(), MOVEFILE_REPLACE_EXISTING);
     }
 }
 
-void DownloadManager::LoadTasks() {
-    std::wstring jsonPath = Config::Instance().GetPortableDataDir() + L"\\tasks.json";
-    std::filesystem::path fsJsonPath(jsonPath);
+bool DownloadManager::TryLoadFromJsonFile(const std::wstring& filePath) {
+    std::filesystem::path fsJsonPath(filePath);
+    if (!std::filesystem::exists(fsJsonPath)) return false;
 
-    if (std::filesystem::exists(fsJsonPath)) {
-        std::ifstream in(fsJsonPath);
-        if (in.is_open()) {
-            std::stringstream ss;
-            ss << in.rdbuf();
-            in.close();
+    std::ifstream in(fsJsonPath, std::ios::in | std::ios::binary);
+    if (!in.is_open()) return false;
 
-            std::string fileContent = ss.str();
-            JsonParser outerParser(fileContent);
-            JValue outerDoc = outerParser.Parse();
+    std::stringstream ss;
+    ss << in.rdbuf();
+    in.close();
 
-            std::string innerJsonStr;
-            bool isEncrypted = outerDoc.getBool("encrypted", false);
-            if (isEncrypted) {
-                std::string payloadB64 = outerDoc.getString("payload");
-                innerJsonStr = Crypto::DecryptDPAPI(payloadB64);
-            } else {
-                if (outerDoc.has("tasks")) {
-                    innerJsonStr = fileContent;
-                }
-            }
+    std::string fileContent = ss.str();
+    if (fileContent.empty()) return false;
 
-            if (!innerJsonStr.empty()) {
-                JsonParser innerParser(innerJsonStr);
-                JValue doc = innerParser.Parse();
-                const auto& tasksArr = doc.getArray("tasks");
+    JsonParser outerParser(fileContent);
+    JValue outerDoc = outerParser.Parse();
 
-                std::lock_guard<std::mutex> lock(m_mutex);
-                m_tasks.clear();
+    std::string innerJsonStr;
+    bool isEncrypted = outerDoc.getBool("encrypted", false);
+    if (isEncrypted) {
+        std::string payloadB64 = outerDoc.getString("payload");
+        innerJsonStr = Crypto::DecryptDPAPI(payloadB64);
+    } else if (outerDoc.has("tasks")) {
+        innerJsonStr = fileContent;
+    }
 
-                for (const auto& taskVal : tasksArr) {
-                    std::wstring wId = JsonParser::Utf8ToWide(taskVal.getString("id"));
-                    std::wstring wUrl = JsonParser::Utf8ToWide(taskVal.getString("url"));
-                    std::wstring wFn = JsonParser::Utf8ToWide(taskVal.getString("filename"));
-                    std::wstring wSdir = JsonParser::Utf8ToWide(taskVal.getString("saveDirectory"));
-                    std::wstring wCat = JsonParser::Utf8ToWide(taskVal.getString("category"));
-                    int splitCount = (int)taskVal.getInt("splitCount", 10);
-                    int stateVal = (int)taskVal.getInt("state", 0);
-                    std::wstring wAdded = JsonParser::Utf8ToWide(taskVal.getString("addedDate"));
-                    std::wstring wCompleted = JsonParser::Utf8ToWide(taskVal.getString("completedDate"));
-                    bool isMedia = taskVal.getBool("isMedia", false);
-                    std::wstring mediaFmt = JsonParser::Utf8ToWide(taskVal.getString("mediaFormat"));
+    if (innerJsonStr.empty()) return false;
 
-                    auto task = std::make_shared<DownloadTask>(wUrl, wSdir, wCat, splitCount, wFn, isMedia, mediaFmt);
-                    task->RestoreMetadata(wId, (DownloadState)stateVal, wAdded, wCompleted, wCat);
+    JsonParser innerParser(innerJsonStr);
+    JValue doc = innerParser.Parse();
+    if (doc.type != JType::Object || !doc.has("tasks")) return false;
 
-                    // Restore logs
-                    const auto& logsArr = taskVal.getArray("logs");
-                    std::vector<TaskLogEntry> restoredLogs;
-                    for (const auto& logItem : logsArr) {
-                        TaskLogEntry entry;
-                        entry.timestamp = JsonParser::Utf8ToWide(logItem.getString("timestamp"));
-                        entry.level = (int)logItem.getInt("level", 0);
-                        entry.message = JsonParser::Utf8ToWide(logItem.getString("message"));
-                        restoredLogs.push_back(entry);
-                    }
-                    task->RestoreLogs(restoredLogs);
+    const auto& tasksArr = doc.getArray("tasks");
+    std::vector<std::shared_ptr<DownloadTask>> loadedTasks;
+    loadedTasks.reserve(tasksArr.size());
 
-                    task->SetEventCallback([this](const std::wstring&) {
-                        if (m_onUpdate) m_onUpdate();
-                    });
+    for (const auto& taskVal : tasksArr) {
+        std::wstring wId = JsonParser::Utf8ToWide(taskVal.getString("id"));
+        std::wstring wUrl = JsonParser::Utf8ToWide(taskVal.getString("url"));
+        std::wstring wResolvedUrl = JsonParser::Utf8ToWide(taskVal.getString("resolvedUrl"));
+        std::wstring wFn = JsonParser::Utf8ToWide(taskVal.getString("filename"));
+        std::wstring wSdir = JsonParser::Utf8ToWide(taskVal.getString("saveDirectory"));
+        std::wstring wCat = JsonParser::Utf8ToWide(taskVal.getString("category"));
+        int splitCount = (int)taskVal.getInt("splitCount", 10);
+        int stateVal = (int)taskVal.getInt("state", 0);
+        uint64_t totalBytes = taskVal.getUInt64("totalBytes", 0);
+        uint64_t downloadedBytes = taskVal.getUInt64("downloadedBytes", 0);
+        bool supportsResume = taskVal.getBool("supportsResume", true);
+        bool customFnSet = taskVal.getBool("customFilenameSet", false);
+        std::wstring wErrorMsg = JsonParser::Utf8ToWide(taskVal.getString("errorMsg"));
+        std::wstring wAdded = JsonParser::Utf8ToWide(taskVal.getString("addedDate"));
+        std::wstring wCompleted = JsonParser::Utf8ToWide(taskVal.getString("completedDate"));
+        bool isMedia = taskVal.getBool("isMedia", false);
+        std::wstring mediaFmt = JsonParser::Utf8ToWide(taskVal.getString("mediaFormat"));
 
-                    m_tasks.push_back(task);
-                }
-                return;
+        std::vector<SegmentInfo> restoredSegs;
+        if (taskVal.has("segments")) {
+            const auto& segsArr = taskVal.getArray("segments");
+            restoredSegs.reserve(segsArr.size());
+            for (const auto& segVal : segsArr) {
+                SegmentInfo si;
+                si.id = (int)segVal.getInt("id", (int64_t)restoredSegs.size());
+                si.startByte = segVal.getUInt64("startByte", 0);
+                si.endByte = segVal.getUInt64("endByte", 0);
+                si.currentOffset = segVal.getUInt64("currentOffset", si.startByte);
+                si.downloadedBytes = segVal.getUInt64("downloadedBytes", 0);
+                si.status = (int)segVal.getInt("status", 0);
+                si.speedBps = 0.0;
+                restoredSegs.push_back(si);
             }
         }
+
+        auto task = std::make_shared<DownloadTask>(wUrl, wSdir, wCat, splitCount, wFn, isMedia, mediaFmt);
+        task->RestoreMetadata(wId, (DownloadState)stateVal, wAdded, wCompleted, wCat,
+                              totalBytes, downloadedBytes, supportsResume,
+                              customFnSet, wResolvedUrl, wErrorMsg, restoredSegs);
+
+        const auto& logsArr = taskVal.getArray("logs");
+        std::vector<TaskLogEntry> restoredLogs;
+        restoredLogs.reserve(logsArr.size());
+        for (const auto& logItem : logsArr) {
+            TaskLogEntry entry;
+            entry.timestamp = JsonParser::Utf8ToWide(logItem.getString("timestamp"));
+            entry.level = (int)logItem.getInt("level", 0);
+            entry.message = JsonParser::Utf8ToWide(logItem.getString("message"));
+            restoredLogs.push_back(entry);
+        }
+        task->RestoreLogs(restoredLogs);
+        ConfigureTaskCallbacks(task);
+
+        loadedTasks.push_back(task);
+    }
+
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        m_tasks = std::move(loadedTasks);
+    }
+    return true;
+}
+
+void DownloadManager::LoadTasks() {
+    std::wstring dataDir = Config::Instance().GetPortableDataDir();
+    std::wstring jsonPath = dataDir + L"\\tasks.json";
+    std::wstring bakPath = jsonPath + L".bak";
+
+    if (TryLoadFromJsonFile(jsonPath)) {
+        return;
+    }
+
+    // Fallback to automatic backup if primary tasks.json was truncated or damaged
+    if (TryLoadFromJsonFile(bakPath)) {
+        SaveTasks();
+        return;
     }
 
     // Legacy fallback: tasks.dat
@@ -587,9 +719,7 @@ void DownloadManager::LoadTasks() {
 
                         auto task = std::make_shared<DownloadTask>(wUrl, wSdir, wCat, splitCount, wFn, isMedia, mediaFmt);
                         task->RestoreMetadata(wId, (DownloadState)stateVal, wAdded, wCompleted, wCat);
-                        task->SetEventCallback([this](const std::wstring&) {
-                            if (m_onUpdate) m_onUpdate();
-                        });
+                        ConfigureTaskCallbacks(task);
                         m_tasks.push_back(task);
                     }
                     shouldMigrate = !m_tasks.empty();

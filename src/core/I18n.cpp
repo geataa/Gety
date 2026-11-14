@@ -236,7 +236,7 @@ void I18n::InitStrings() {
     tr[StrId::DlgDeletePrompt]      = L"Seçili görevi silmek istediğinize emin misiniz?\n\n(Dosyayı diskten de silmek için 'Evet'e, listeden kaldırmak için 'Hayır'a basın)";
     tr[StrId::DlgDeleteTitle]       = L"Görevi Sil";
     tr[StrId::DlgAboutTitle]        = L"Gety Hakkında";
-    tr[StrId::DlgAboutDesc]         = L"⚡ Gety\nSürüm: 1.0 (C++20 Native Ultra-Fast Edition)\n\nModern C++ ile sıfırdan yazılmış %100 taşınabilir (portable) hızlı indirme yöneticisi.\n\nÖzellikler:\n• Çok parçalı (1-30 parça) eşzamanlı HTTP/HTTPS indirme\n• Renkli kare blok indirme matrisi (Matrix Visualizer)\n• Masaüstünde yüzen saydam indirme hedefi (Floating Drop Zone)\n• Otomatik pano URL yakalama (Clipboard Monitor)\n• Sıfır kurulum & sıfır Registry kirliliği (tamamen portable)\n• Token-bucket bant genişliği ve hız sınırlama modları\n• Toplu indirme (Batch URL)\n• 12 Dil desteği ve kusursuz Unicode";
+    tr[StrId::DlgAboutDesc]         = L"⚡ Gety\nSürüm: 1.1.0 (C++23 Native Ultra-Fast Edition)\n\nModern C++ ile sıfırdan yazılmış %100 taşınabilir (portable) hızlı indirme yöneticisi.\n\nÖzellikler:\n• Çok parçalı (1-30 parça) eşzamanlı HTTP/HTTPS indirme\n• Renkli kare blok indirme matrisi (Matrix Visualizer)\n• Masaüstünde yüzen saydam indirme hedefi (Floating Drop Zone)\n• Otomatik pano URL yakalama (Clipboard Monitor)\n• Sıfır kurulum & sıfır Registry kirliliği (tamamen portable)\n• Token-bucket bant genişliği ve hız sınırlama modları\n• Toplu indirme (Batch URL)\n• 12 Dil desteği ve kusursuz Unicode";
 
     // ---------------------------------------------------------
 
@@ -474,7 +474,7 @@ void I18n::InitStrings() {
     en[StrId::DlgDeletePrompt]      = L"Are you sure you want to delete this task?\n\n(Click 'Yes' to delete from disk as well, or 'No' to remove from list only)";
     en[StrId::DlgDeleteTitle]       = L"Delete Task";
     en[StrId::DlgAboutTitle]        = L"About Gety";
-    en[StrId::DlgAboutDesc]         = L"⚡ Gety\nVersion: 1.0 (C++20 Native Ultra-Fast Edition)\n\nA 100% portable fast download manager written from scratch in modern C++.\n\nFeatures:\n• Multi-segmented (1-30 parts) accelerated downloading\n• Chunk matrix grid visualizer\n• Floating desktop drop zone\n• Clipboard monitor\n• Zero registry pollution / USB-ready\n• Token-bucket speed throttling modes\n• Batch URL expansion\n• 12 Languages with complete Unicode support";
+    en[StrId::DlgAboutDesc]         = L"⚡ Gety\nVersion: 1.1.0 (C++23 Native Ultra-Fast Edition)\n\nA 100% portable fast download manager written from scratch in modern C++.\n\nFeatures:\n• Multi-segmented (1-30 parts) accelerated downloading\n• Chunk matrix grid visualizer\n• Floating desktop drop zone\n• Clipboard monitor\n• Zero registry pollution / USB-ready\n• Token-bucket speed throttling modes\n• Batch URL expansion\n• 12 Languages with complete Unicode support";
 
     // ---------------------------------------------------------
 
@@ -891,7 +891,7 @@ void I18n::InitStrings() {
     uk[StrId::DlgDeletePrompt]      = L"Ви дійсно бажаєте видалити вибрані завдання?\n\n(Натисніть 'Так' для видалення файлу з диска, 'Ні' щоб прибрати лише зі списку)";
     uk[StrId::DlgDeleteTitle]       = L"Видалити завдання";
     uk[StrId::DlgAboutTitle]        = L"Про програму Gety";
-    uk[StrId::DlgAboutDesc]         = L"⚡ Gety\nВерсія: 1.0 (C++20 Native Ultra-Fast Edition)\n\nСучасний портативний менеджер швидкого завантаження, написаний на C++.\n\nМожливості:\n• Багатопотокове (1-30 сегментів) одночасне завантаження HTTP/HTTPS\n• Матричний візуалізатор блоків\n• Плаваюче вікно для скидання посилань (Drop Zone)\n• Автоперехоплення посилань із буфера обміну\n• Повна портативність без інсталяції\n• Гнучке обмеження швидкості\n• Пакетне завантаження (Batch URL)\n• Підтримка 12 мов і Unicode";
+    uk[StrId::DlgAboutDesc]         = L"⚡ Gety\nВерсія: 1.1.0 (C++23 Native Ultra-Fast Edition)\n\nСучасний портативний менеджер швидкого завантаження, написаний на C++.\n\nМожливості:\n• Багатопотокове (1-30 сегментів) одночасне завантаження HTTP/HTTPS\n• Матричний візуалізатор блоків\n• Плаваюче вікно для скидання посилань (Drop Zone)\n• Автоперехоплення посилань із буфера обміну\n• Повна портативність без інсталяції\n• Гнучке обмеження швидкості\n• Пакетне завантаження (Batch URL)\n• Підтримка 12 мов і Unicode";
 
     uk[StrId::ActNew]               = L"Створити";
     uk[StrId::ActBatch]             = L"Пакет";
