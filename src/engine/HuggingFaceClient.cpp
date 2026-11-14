@@ -330,7 +330,7 @@ HuggingFaceFetchResult HuggingFaceClient::FetchModelTree(const HuggingFaceModelS
         statusCb(L"Hugging Face Hub API'sine bağlanılıyor: " + spec.repoId + L"...");
     }
 
-    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, true);
+    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, false);
     if (!hSession) {
         result.errorMsg = L"WinHTTP başlatılamadı.";
         return result;

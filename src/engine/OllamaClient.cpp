@@ -227,8 +227,8 @@ OllamaFetchResult OllamaClient::FetchModelInfo(const OllamaModelSpec& spec,
         statusCb(L"Ollama kayıt sunucusuna bağlanılıyor: " + spec.displayName + L"...");
     }
 
-    // 1. Initialize WinHTTP session (TLS 1.2/1.3, HTTP/2/3, compressed JSON API responses)
-    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, true);
+    // 1. Initialize WinHTTP session (TLS 1.2/1.3, HTTP/2/3)
+    HINTERNET hSession = WinHttpUtils::CreateSession(WinHttpUtils::kClientUserAgent, true, false);
     if (!hSession) {
         result.errorMsg = L"WinHTTP başlatılamadı.";
         return result;

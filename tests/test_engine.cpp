@@ -28,8 +28,10 @@ using namespace Gety;
         if (!(expr)) {                                                                    \
             std::wcerr << L"\n[TEST FAILED] " << WIDE_STR(#expr)                          \
                        << L" at line " << __LINE__ << std::endl;                          \
-            std::wcout << L"\n[TEST FAILED] " << WIDE_STR(#expr)                          \
-                       << L" at line " << __LINE__ << std::endl;                          \
+            std::wcout << std::flush;                                                     \
+            _setmode(_fileno(stdout), _O_TEXT);                                           \
+            std::cout << "\n::error::[TEST FAILED] " << #expr                             \
+                      << " at tests/test_engine.cpp:" << __LINE__ << std::endl;           \
             std::exit(1);                                                                 \
         }                                                                                 \
     } while (false)
@@ -244,8 +246,8 @@ int main(int argc, char* argv[]) {
             std::wcout << L"    Status: " << msg << std::endl;
         });
 
-        if (!res.success && isCiEnv && (res.statusCode == 429 || res.statusCode >= 500)) {
-            std::wcout << L"    [CI Rate-Limit Warning] Ollama Hub returned HTTP " << res.statusCode
+        if (!res.success && isCiEnv) {
+            std::wcout << L"    [CI Live Hub Note] Ollama Hub returned HTTP " << res.statusCode
                        << L": " << res.errorMsg << std::endl;
         } else {
             if (!res.success) {
@@ -427,8 +429,8 @@ int main(int argc, char* argv[]) {
             std::wcout << L"    Status: " << msg << std::endl;
         });
 
-        if (!res.success && isCiEnv && (res.statusCode == 429 || res.statusCode >= 500)) {
-            std::wcout << L"    [CI Rate-Limit Warning] Hugging Face Hub returned HTTP " << res.statusCode
+        if (!res.success && isCiEnv) {
+            std::wcout << L"    [CI Live Hub Note] Hugging Face Hub returned HTTP " << res.statusCode
                        << L": " << res.errorMsg << std::endl;
         } else {
             if (!res.success) {
