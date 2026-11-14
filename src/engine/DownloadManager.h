@@ -71,6 +71,7 @@ private:
     UpdateCallback m_onUpdate;
 
     std::thread m_timerThread;
+    std::atomic<bool> m_initialized = false;
     std::atomic<bool> m_running = false;
     std::atomic<bool> m_tasksDirty = false;
     std::chrono::steady_clock::time_point m_lastAutoSaveTime{};

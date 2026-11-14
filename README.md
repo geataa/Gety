@@ -9,7 +9,7 @@
   <img src="https://img.shields.io/badge/C%2B%2B-23-00599C?logo=c%2B%2B" alt="C++23">
   <img src="https://img.shields.io/badge/Platform-Windows%2010%20%2F%2011%20x64-0078D6?logo=windows" alt="Platform: Windows x64">
   <img src="https://img.shields.io/badge/UI-Direct2D%20Hardware%20Accelerated-informational" alt="Direct2D">
-  <img src="https://img.shields.io/badge/Vibe%20Coding-Gemini%203.8%20%7C%20DeepMind-8A2BE2" alt="Vibe Coded with Gemini 3.8">
+  <img src="https://img.shields.io/badge/Vibe%20Coding-Gemini%204%20%7C%20DeepMind-8A2BE2" alt="Vibe Coded with Gemini 4">
   <img src="https://img.shields.io/badge/Portable-Zero%20Registry%20%7C%20%2FMT-success" alt="Portable">
 </p>
 
@@ -157,12 +157,12 @@ Both projects provided tremendous architectural inspiration, which we reimplemen
 
 ---
 
-## 🤖 Vibe Coding with Google DeepMind Gemini 3.8
+## 🤖 Vibe Coding with Google DeepMind Gemini 4
 
-This project embraces the future of software engineering: **Gety was developed through Vibe Coding with Google DeepMind's Gemini 3.8 via Antigravity**.
+This project embraces the future of software engineering: **Gety was originally forged with Gemini 3.8 and evolved to v1.1.0 (C++23) through Vibe Coding with Google DeepMind's Gemini 4 via Antigravity**.
 
 - **Human Vision & Direction**: System architecture design, UX conception, performance specifications, and real-time validation by [@geataa](https://github.com/geataa).
-- **AI Agentic Execution**: High-performance C++23 native code synthesis, Win32 message loop design, Direct2D rendering pipelines, and security implementations powered by **Gemini 3.8**.
+- **AI Agentic Execution**: High-performance C++23 native code synthesis, Win32 message loop design, Direct2D rendering pipelines, crash-resilient DPAPI persistence, and security implementations powered by **Gemini 4** (building on its **Gemini 3.8** foundations).
 - **Zero Hallucination Standard**: 100% verified with deterministic automated test suites and live execution benchmarks.
 
 We believe in radical transparency: AI-assisted development empowers solo creators to deliver robust, industrial-grade native applications at breakneck speed.

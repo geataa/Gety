@@ -68,6 +68,14 @@ inline CliLaunchOptions ParseCliArgs(const std::wstring& cmdLineArgs) {
             continue;
         }
 
+        if (lower.rfind(L"http://", 0) == 0 ||
+            lower.rfind(L"https://", 0) == 0 ||
+            lower.rfind(L"ftp://", 0) == 0 ||
+            lower.rfind(L"magnet:", 0) == 0) {
+            opts.urls.push_back(WinHttpUtils::TrimUrl(rawTok));
+            continue;
+        }
+
         std::wstring extractedUrl = WinHttpUtils::ExtractUrlFromText(rawTok);
         if (!extractedUrl.empty()) {
             opts.urls.push_back(extractedUrl);

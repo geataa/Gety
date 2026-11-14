@@ -50,22 +50,31 @@ public:
 
         DWORD protocols = WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_2;
 #ifdef WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3
-        protocols |= WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
-#endif
+        DWORD tlsModern = protocols | WINHTTP_FLAG_SECURE_PROTOCOL_TLS1_3;
+        if (!WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &tlsModern, sizeof(tlsModern))) {
+            // Fallback for Windows 10 / Windows Server 2022 kernels without Schannel client TLS 1.3
+            WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+        }
+#else
         WinHttpSetOption(hSession, WINHTTP_OPTION_SECURE_PROTOCOLS, &protocols, sizeof(protocols));
+#endif
 
 #ifdef WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL
         if (enableHttp2And3) {
-            DWORD httpProtos = 0;
+            DWORD http2Only = 0;
 #ifdef WINHTTP_PROTOCOL_FLAG_HTTP2
-            httpProtos |= WINHTTP_PROTOCOL_FLAG_HTTP2;
+            http2Only |= WINHTTP_PROTOCOL_FLAG_HTTP2;
 #endif
 #ifdef WINHTTP_PROTOCOL_FLAG_HTTP3
-            httpProtos |= WINHTTP_PROTOCOL_FLAG_HTTP3;
-#endif
-            if (httpProtos != 0) {
-                WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &httpProtos, sizeof(httpProtos));
+            DWORD http2And3 = http2Only | WINHTTP_PROTOCOL_FLAG_HTTP3;
+            if (!WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &http2And3, sizeof(http2And3)) && http2Only != 0) {
+                WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &http2Only, sizeof(http2Only));
             }
+#else
+            if (http2Only != 0) {
+                WinHttpSetOption(hSession, WINHTTP_OPTION_ENABLE_HTTP_PROTOCOL, &http2Only, sizeof(http2Only));
+            }
+#endif
         }
 #endif
 
@@ -78,6 +87,28 @@ public:
 
         WinHttpSetTimeouts(hSession, 15000, 15000, 20000, 20000);
         return hSession;
+    }
+
+    /**
+     * Reads the full HTTP response body until true EOF (bytesRead == 0).
+     * Safe for both uncompressed and WINHTTP_OPTION_DECOMPRESSION (gzip/deflate) streams,
+     * avoiding WinHttpQueryDataAvailable edge cases on compressed chunked responses.
+     */
+    static bool ReadAllResponseBody(HINTERNET hRequest, std::string& outBody) {
+        outBody.clear();
+        if (!hRequest) return false;
+        char chunk[16384];
+        for (;;) {
+            DWORD bytesRead = 0;
+            if (!WinHttpReadData(hRequest, chunk, sizeof(chunk), &bytesRead)) {
+                return false;
+            }
+            if (bytesRead == 0) {
+                break;
+            }
+            outBody.append(chunk, bytesRead);
+        }
+        return true;
     }
 
     static bool ParseUrl(const std::wstring& url, UrlParts& parts) {

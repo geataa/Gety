@@ -413,16 +413,9 @@ HuggingFaceFetchResult HuggingFaceClient::FetchModelTree(const HuggingFaceModelS
         return result;
     }
 
-    // Read full JSON response body
+    // Read full JSON response body (EOF-driven, safe for gzip/deflate decompression)
     std::string responseBody;
-    DWORD bytesAvailable = 0;
-    while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
-        std::vector<char> buffer(bytesAvailable);
-        DWORD bytesRead = 0;
-        if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
-            responseBody.append(buffer.data(), bytesRead);
-        }
-    }
+    WinHttpUtils::ReadAllResponseBody(hRequest, responseBody);
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);

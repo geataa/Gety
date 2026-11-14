@@ -19,7 +19,9 @@ DownloadManager& DownloadManager::Instance() {
 DownloadManager::DownloadManager() = default;
 
 DownloadManager::~DownloadManager() {
-    Shutdown();
+    if (m_initialized.load()) {
+        Shutdown();
+    }
 }
 
 void DownloadManager::Init(UpdateCallback onUpdate) {
@@ -27,6 +29,7 @@ void DownloadManager::Init(UpdateCallback onUpdate) {
     LoadTasks();
     m_lastAutoSaveTime = std::chrono::steady_clock::now();
 
+    m_initialized = true;
     m_running = true;
     m_timerThread = std::thread([this]() {
         while (m_running.load()) {
@@ -59,8 +62,10 @@ void DownloadManager::Shutdown() {
         m_timerThread.join();
     }
 
-    PauseAll();
-    SaveTasks();
+    if (m_initialized.exchange(false)) {
+        PauseAll();
+        SaveTasks();
+    }
 }
 
 void DownloadManager::TickQueue() {
@@ -243,9 +248,13 @@ void DownloadManager::DeleteTask(const std::wstring& id, bool deleteFile) {
         }
     }
     if (target) {
-        std::thread([target, deleteFile]() {
+        if (m_initialized.load()) {
+            std::thread([target, deleteFile]() {
+                target->DeleteTask(deleteFile);
+            }).detach();
+        } else {
             target->DeleteTask(deleteFile);
-        }).detach();
+        }
     }
     SaveTasks();
     if (m_onUpdate) m_onUpdate();

@@ -321,18 +321,9 @@ OllamaFetchResult OllamaClient::FetchModelInfo(const OllamaModelSpec& spec,
         statusCb(L"Manifest indirildi, katmanlar çözümleniyor...");
     }
 
-    // Read Response Body
+    // Read Response Body (EOF-driven, safe for gzip/deflate decompression)
     std::string responseBody;
-    DWORD bytesAvailable = 0;
-    while (WinHttpQueryDataAvailable(hRequest, &bytesAvailable) && bytesAvailable > 0) {
-        std::vector<char> buffer(bytesAvailable);
-        DWORD bytesRead = 0;
-        if (WinHttpReadData(hRequest, buffer.data(), bytesAvailable, &bytesRead) && bytesRead > 0) {
-            responseBody.append(buffer.data(), bytesRead);
-        } else {
-            break;
-        }
-    }
+    WinHttpUtils::ReadAllResponseBody(hRequest, responseBody);
 
     WinHttpCloseHandle(hRequest);
     WinHttpCloseHandle(hConnect);
